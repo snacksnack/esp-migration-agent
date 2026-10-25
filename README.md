@@ -1,2 +1,56 @@
-# esp-migration-agent
-ESP Migration Agent: gated email-platform migration engine. LLM proposes, deterministic Python validates, human approves.
+# ESP Migration Agent
+
+Gated email-platform migration engine: upload a customer's export from one
+email service provider, get a signed-off, validated migration into another.
+The agent does the solutions-engineer work; a human approves each gate.
+
+**Thesis: the LLM proposes, deterministic Python validates, a human approves.**
+
+## Pipeline
+
+1. **Ingest** - deterministic parsers over a real Mailchimp export bundle.
+   Counting is not a judgment call; no LLM here.
+2. **Discovery report** - what you have (lists, fields, segments, templates,
+   suppressions, consent) plus an audience profile, a scope-and-estimate
+   proposal, and a risk register. Every number computed; the LLM narrates.
+3. **Mapping proposal** - field mappings, merge-tag translation, segment-logic
+   translation, consent semantics. Every mapping carries a confidence and a
+   rationale; ambiguous ones are flagged as open questions, never guessed.
+4. **Human review gate** - the mapping spec is a reviewable document the
+   customer edits and signs off. Nothing downstream runs from anything except
+   the approved spec.
+5. **Deterministic executor** - transforms per the approved spec, dry-run diff
+   first, then loads the target via its API.
+6. **Reconciliation report** - per-list counts, sampled checksums, suppression
+   integrity, rolled into a customer-facing sign-off report.
+
+**The hard rule, held in Python, never the model:** suppressions migrate
+first, and no suppressed address can ever land subscribable in the target.
+The schema cannot even represent a spec that violates it
+(`specs/model.py::SuppressionPolicy`).
+
+## Source and targets
+
+- Source: Mailchimp export bundle. The committed fixture is a genuine export
+  of a free account seeded with Faker data - real format, synthetic data
+  (ADR-0001).
+- Dev target: self-hosted [Listmonk](https://listmonk.app). Live-demo target:
+  Brevo free tier (ADR-0002).
+
+## Layout
+
+- `specs/` - mapping-spec schema (pydantic) + worked example YAML (ADR-0003)
+- `seeding/` - deterministic subscriber generator + Mailchimp seeder, and the
+  `ground_truth.json` the discovery stage is verified against
+- `fixtures/` - the synthetic export bundle (see fixtures/README.md)
+- `docs/decisions.md` - ADRs, newest first
+
+## Commands
+
+```bash
+uv sync                                       # install
+uv run ruff check . && uv run pytest          # checks (same as CI)
+uv run python -m seeding.mailchimp_seeder --dry-run   # regenerate ground truth
+```
+
+Work is tracked under Jira epic RC1-542 (this scaffold: RC1-543).
