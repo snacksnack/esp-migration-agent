@@ -1,0 +1,162 @@
+"""Mapping-spec schema: the stage-4 reviewable document (ADR-0003).
+
+Structural invariants live here, not in review discipline: a flagged mapping
+must ask a question instead of guessing a target, an approved spec cannot
+contain unresolved mappings, and the suppression ordering invariant is
+unrepresentable any other way.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import datetime
+from enum import StrEnum
+from typing import ClassVar, Literal
+
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+class MappingStatus(StrEnum):
+    PROPOSED = "proposed"  # LLM output, untouched
+    APPROVED = "approved"  # reviewer accepted as proposed
+    EDITED = "edited"  # reviewer changed it; the edit is the mapping
+    FLAGGED = "flagged"  # ambiguous: carries an open question, never a guess
+
+
+class SpecStatus(StrEnum):
+    DRAFT = "draft"
+    IN_REVIEW = "in_review"
+    APPROVED = "approved"
+
+
+class ReviewedMapping(BaseModel):
+    """Common shape of every LLM-proposed mapping: confidence, rationale, review status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Name of the subclass field that may be omitted only while flagged.
+    target_attr: ClassVar[str | None] = None
+
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str = Field(min_length=1)
+    status: MappingStatus = MappingStatus.PROPOSED
+    open_question: str | None = None
+
+    @model_validator(mode="after")
+    def _flag_dont_guess(self) -> ReviewedMapping:
+        if self.status is MappingStatus.FLAGGED:
+            if not self.open_question:
+                raise ValueError("a flagged mapping must carry an open_question")
+        elif self.target_attr and not getattr(self, self.target_attr):
+            raise ValueError(
+                f"{self.target_attr} is required unless the mapping is flagged"
+            )
+        return self
+
+
+class FieldMapping(ReviewedMapping):
+    target_attr: ClassVar[str] = "target_field"
+
+    source_field: str
+    source_type: str
+    sample_values: list[str] = []
+    target_field: str | None = None
+    transform: str = "none"
+
+
+class SegmentMapping(ReviewedMapping):
+    target_attr: ClassVar[str] = "target_query"
+
+    source_segment: str
+    source_logic: str
+    target_query: str | None = None
+
+
+class ConsentMapping(ReviewedMapping):
+    target_attr: ClassVar[str] = "target_status"
+
+    source_status: str
+    target_status: str | None = None
+
+
+class MergeTagMapping(BaseModel):
+    """Mechanical tag translation (*|FNAME|* -> template syntax); no judgment, no status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_tag: str
+    target_tag: str
+
+
+class SuppressionPolicy(BaseModel):
+    """The hard rule of RC1-542, held structurally: suppressions migrate first,
+    and the schema cannot express any other ordering."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    order: Literal["before_subscribers"] = "before_subscribers"
+    source_statuses: list[str] = ["unsubscribed", "cleaned"]
+
+
+class Approval(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approved_by: str = Field(min_length=1)
+    approved_at: datetime
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class MappingSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    spec_version: Literal[1] = 1
+    source: str
+    target: str
+    generated_at: datetime
+    status: SpecStatus = SpecStatus.DRAFT
+    field_mappings: list[FieldMapping] = []
+    merge_tag_mappings: list[MergeTagMapping] = []
+    segment_mappings: list[SegmentMapping] = []
+    consent_mappings: list[ConsentMapping] = []
+    suppressions: SuppressionPolicy = SuppressionPolicy()
+    approval: Approval | None = None
+
+    @model_validator(mode="after")
+    def _approved_means_resolved(self) -> MappingSpec:
+        if self.status is not SpecStatus.APPROVED:
+            return self
+        if self.approval is None:
+            raise ValueError("an approved spec must carry an approval block")
+        unresolved = [
+            m for m in self.reviewed_mappings()
+            if m.status in (MappingStatus.PROPOSED, MappingStatus.FLAGGED)
+        ]
+        if unresolved:
+            raise ValueError(
+                f"an approved spec may not contain {len(unresolved)} unresolved "
+                "(proposed or flagged) mappings"
+            )
+        return self
+
+    def reviewed_mappings(self) -> list[ReviewedMapping]:
+        return [*self.field_mappings, *self.segment_mappings, *self.consent_mappings]
+
+    def open_questions(self) -> list[str]:
+        return [m.open_question for m in self.reviewed_mappings() if m.open_question]
+
+    def content_sha256(self) -> str:
+        """Hash of the reviewed content (everything except the approval block),
+        pinned into Approval so the executor runs exactly what was signed off."""
+        content = self.model_dump(mode="json", exclude={"approval"})
+        return hashlib.sha256(
+            json.dumps(content, sort_keys=True).encode()
+        ).hexdigest()
+
+    @classmethod
+    def from_yaml(cls, text: str) -> MappingSpec:
+        return cls.model_validate(yaml.safe_load(text))
+
+    def to_yaml(self) -> str:
+        return yaml.safe_dump(self.model_dump(mode="json"), sort_keys=False)
