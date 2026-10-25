@@ -59,9 +59,16 @@ Listmonk, RC1-547 adds the Brevo adapter.
 ## ADR-0001: Source fixture is a genuine export of a seeded Mailchimp account (2026-10-24)
 
 **Decision.** The canonical source fixture is a real Mailchimp export bundle
-pulled from a free account that we first seed, via the Marketing API, with
+pulled from an account that we first seed, via the Marketing API, with
 Faker-generated data (fixed seed). Synthetic data only; the bundle is safe to
 commit and lives in `fixtures/`.
+
+**Account reality (updated 2026-10-25).** Mailchimp no longer has a permanent
+free tier; the account is a 14-day trial on the 5,000-contact tier ($100/mo
+after). The account is only needed for the one-shot seed + export - the
+committed bundle is the permanent fixture - so the trial is canceled once the
+export is captured. Seed count raised from 450 to 4,500 to use the headroom:
+better demo numbers, same distributions.
 
 **Why not fabricate the export format:** the parsers (RC1-544) are the
 deterministic foundation of the whole pipeline; they must be tested against
@@ -73,8 +80,8 @@ a seed it returns subscriber records plus the expected aggregate distributions
 (domain mix, geography, signup-tenure cohorts, consent mix, seeded
 data-quality issues). Those expected aggregates are written to
 `seeding/ground_truth.json` at seed time, and RC1-544's audience profile and
-risk register are verified against them. ~450 subscribers (free tier caps at
-500 contacts, one audience).
+risk register are verified against them. ~4,500 subscribers (5,000-contact
+trial tier, one audience).
 
 **Seeded risks (so the risk register has ground truth):**
 

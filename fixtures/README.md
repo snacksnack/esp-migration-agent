@@ -5,19 +5,54 @@ genuine Mailchimp account export, but the account was seeded exclusively with
 Faker-generated data by `seeding/mailchimp_seeder.py` (fixed seed; ADR-0001).
 No real subscriber data exists anywhere in this repository.
 
-## Status
+## Status (2026-10-25)
 
-Not yet captured. The bundle lands here once the seeded account is exported
-(RC1-543 acceptance). To produce it:
+- `mailchimp_export/audience/` - CAPTURED: the genuine audience export
+  (three CSVs: subscribed 3,756 / unsubscribed 411 / nonsubscribed 88 rows),
+  matching `seeding/ground_truth.json` exactly.
+- `api_supplement/` - CAPTURED via `seeding/capture_supplement.py`:
+  saved-segment definitions (including conditions), template metadata, and
+  draft-campaign metadata + HTML content. Mirrors real engagements, where
+  segment logic is pulled over the API during discovery. The account owner's
+  `reply_to` is masked to `owner@redacted.invalid` so nothing real is
+  committed.
+- Account-level export (Settings > Manage > Export account data) - PENDING:
+  Mailchimp allows one export per 24h and the audience export used today's
+  slot. Lands under `mailchimp_export/account/` tomorrow.
 
-1. Create a Mailchimp free account (one audience, 500-contact cap).
+## Findings baked into the fixture (discovery-stage material)
+
+- **Mailchimp's audience export silently omits pending members.** 4,499
+  members are in the account; the CSVs carry 4,255. The 244 members with
+  status `pending` appear in no CSV. A genuine source-platform risk for the
+  risk register: unconfirmed signups do not survive a CSV-export migration.
+- **MEMBER_RATING is uniformly 2** (Mailchimp's default) across all 4,255
+  exported rows - the account never sent anything, so no engagement signal
+  exists. This is the engagement ground truth: the "Highly engaged (4-5
+  stars)" segment is structurally empty, and the audience profile's
+  engagement distribution is degenerate by design.
+- One generated address was rejected by Mailchimp's validity heuristic and is
+  therefore absent from the account (`seeding/rejected_emails.json`); ground
+  truth is reconciled to the 4,499 that landed.
+
+## Capture procedure
+
+To reproduce from scratch:
+
+1. Create a Mailchimp account (14-day trial, 5,000-contact tier; cancel after
+   the export is captured - see ADR-0001).
 2. Put the API key in `.env` as `ESP_MAILCHIMP_API_KEY` (never commit it).
-3. `uv run python -m seeding.mailchimp_seeder` - seeds ~450 members, merge
-   fields, and two saved segments, and writes `seeding/ground_truth.json`.
-4. In the Mailchimp UI: Account > Settings > Manage > Export account data.
-   (The full-account export has no public API; this step is manual.)
-5. Download the zip, extract it into `fixtures/mailchimp_export/`, and commit
-   it together with `seeding/ground_truth.json`.
+3. `uv run python -m seeding.mailchimp_seeder --count 4500` - seeds the
+   members, merge fields, and two saved segments, and writes
+   `seeding/ground_truth.json` (reconciled over observed rejections).
+4. `uv run python -m seeding.campaign_seeder` - seeds two merge-tag-rich
+   templates and three DRAFT campaigns (nothing is ever sent).
+5. `uv run python -m seeding.capture_supplement` - captures segment
+   definitions, template and campaign metadata to `api_supplement/`.
+6. In the Mailchimp UI: export the audience (Audience > Export Audience) and
+   the account (Account > Settings > Manage > Export account data; no public
+   API, one export per 24h). Extract under `mailchimp_export/` and commit
+   together with `seeding/ground_truth.json`.
 
 ## Ground truth
 
