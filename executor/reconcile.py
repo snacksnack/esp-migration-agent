@@ -245,7 +245,8 @@ def build_reconciliation(
             CampaignCheck(
                 name=planned.name,
                 residual_source_tags=sorted(set(MERGE_TAG_RE.findall(body))),
-                render_matches=_render_source(source_html, tag_map) == _render_target(body),
+                render_matches=_render_source(source_html, tag_map).strip()
+                == _render_target(body).strip(),
             )
         )
 
