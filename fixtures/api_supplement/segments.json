@@ -34,5 +34,47 @@
     },
     "member_count": 0,
     "created_at": "2026-10-25T20:00:45+00:00"
+  },
+  {
+    "id": 6401374,
+    "name": "VIP customers",
+    "type": "saved",
+    "options": {
+      "match": "all",
+      "conditions": [
+        {
+          "condition_type": "TextMerge",
+          "field": "LASTPURCH",
+          "op": "contains",
+          "value": "2026"
+        }
+      ]
+    },
+    "member_count": 1709,
+    "created_at": "2026-10-26T17:54:58+00:00"
+  },
+  {
+    "id": 6401375,
+    "name": "VIP (legacy)",
+    "type": "saved",
+    "options": {
+      "match": "any",
+      "conditions": [
+        {
+          "condition_type": "TextMerge",
+          "field": "LASTPURCH",
+          "op": "contains",
+          "value": "2026"
+        },
+        {
+          "condition_type": "TextMerge",
+          "field": "ZIP",
+          "op": "starts",
+          "value": "112"
+        }
+      ]
+    },
+    "member_count": 1712,
+    "created_at": "2026-10-26T17:55:00+00:00"
   }
 ]

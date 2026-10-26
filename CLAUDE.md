@@ -32,6 +32,11 @@ proposes, deterministic Python validates, a human approves.
 - `discovery/` - audience profile, inventory, risk register, proposal, and
   the rendered report (`python -m discovery.report`). The only LLM call is
   `narrator.py`, which narrates precomputed aggregates and nothing else.
+- `mapping/` - the Phase 2 proposer + review gate (ADR-0005). `proposer.py`
+  holds the system's main LLM call; its payload is its entire world, Python
+  assembles the spec shell, and pre-resolved output is a ProposalError.
+  `gate.py::load_approved` is the ONLY door downstream stages read a spec
+  through. The review CLI is `python -m mapping.review`.
 - `seeding/generator.py` - pure, seeded subscriber generator returning records
   plus expected aggregates (the ground truth for RC1-544).
 - `seeding/mailchimp_seeder.py` - API uploader; needs `ESP_MAILCHIMP_API_KEY`.
