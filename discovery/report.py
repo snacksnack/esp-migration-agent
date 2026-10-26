@@ -23,9 +23,11 @@ from discovery.inventory import Inventory, build_inventory
 from discovery.narrator import narrate
 from discovery.profile import AudienceProfile, build_profile
 from discovery.proposal import Proposal, build_proposal
-from discovery.risks import Risk, build_risk_register
+from discovery.risks import Risk, build_risk_register, sort_risks
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from ingest.models import MailchimpBundle
+from mapping.gate import load_spec
+from mapping.risks import spec_risks
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
@@ -186,12 +188,23 @@ def main() -> int:
         action="store_true",
         help="add the LLM-narrated summary (needs ESP_ANTHROPIC_API_KEY)",
     )
+    parser.add_argument(
+        "--spec",
+        type=Path,
+        default=None,
+        help="mapping spec (RC1-545) whose open questions join the risk register",
+    )
     parser.add_argument("--out", type=Path, default=None, help="write markdown here")
     args = parser.parse_args()
 
     as_of = datetime.strptime(args.as_of, "%Y-%m-%d").replace(tzinfo=UTC)
     bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
     report = build_report(bundle, as_of=as_of, target=args.target)
+    if args.spec:
+        # Flagged-mapping open questions join the same severity-ranked log.
+        # Merged after build_report so the effort model stays driven by
+        # discovery counts alone.
+        report.risks = sort_risks([*report.risks, *spec_risks(load_spec(args.spec))])
     if args.narrate:
         report.narration = narrate(report.profile, report.inventory, report.risks)
     markdown = render_markdown(report)
