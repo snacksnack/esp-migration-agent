@@ -37,7 +37,7 @@ from executor.queries import evaluate_query
 from executor.target import TargetError, TargetSubscriber
 
 BREVO_API = "https://api.brevo.com/v3"
-PAGE_SIZE = 1000
+PAGE_SIZE = 500  # Brevo's max `limit` on the list-contacts endpoint
 CONSENT_ATTR = "ESP_CONSENT"
 FOLDER_NAME = "ESP migration"
 

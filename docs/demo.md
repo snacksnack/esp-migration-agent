@@ -32,6 +32,9 @@ fixture takes ~15 minutes of write time per fresh target).
 To reset the Listmonk target between takes: `docker compose down -v && docker
 compose up -d`, then re-run the bootstrap eval line.
 
+A rendered clip of the full arc lives at [docs/demo.gif](demo.gif)
+(asciinema cast -> agg, idle time capped at 2s).
+
 ## Recording
 
 - `asciinema rec demo.cast -c "bash scripts/demo.sh"` for a terminal cast, or
