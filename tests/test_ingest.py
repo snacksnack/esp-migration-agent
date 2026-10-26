@@ -34,6 +34,8 @@ def test_supplement_objects(bundle):
     assert {s.name for s in bundle.segments} == {
         "Brooklyn subscribers",
         "Highly engaged (4-5 stars)",
+        "VIP customers",  # RC1-545 seeded ambiguity: overlapping VIP segments
+        "VIP (legacy)",
     }
     assert all(s.conditions for s in bundle.segments)  # definitions, not just names
     assert {t.name for t in bundle.templates} == {"Monthly newsletter", "Promo blast"}

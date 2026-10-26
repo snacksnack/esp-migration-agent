@@ -3,6 +3,43 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0005: The proposer only proposes; the gate owns resolution (2026-10-26)
+
+**Decision.** Phase 2 lives in `mapping/`: the LLM proposer
+(`mapping/proposer.py`), the review gate (`mapping/gate.py`), the
+flagged-mapping risk bridge (`mapping/risks.py`), and the review CLI
+(`python -m mapping.review`: propose / status / approve).
+
+**The proposer's world is a deterministic payload** (`mapping_payload`), same
+boundary as the discovery narrator: observed merge-field formats with
+deterministic per-format sample values, full segment definitions, consent
+buckets with counts, merge tags in use, and prose capability notes for the
+target (`TARGET_NOTES`). The model returns only the four mapping lists;
+Python assembles the spec shell (version, source, target, generated_at,
+status=draft, suppression policy), so every structural field stays
+deterministic. A proposer that emits status `approved`/`edited` is a defect
+(`ProposalError`): only a human resolves a mapping.
+
+**The review surface is the YAML document itself** (per ADR-0003): the
+reviewer edits mappings to `approved`/`edited` and answers open questions in
+place; `mapping.review status` renders the worklist. `approve()` refuses a
+spec with any mapping still `proposed` or `flagged`, then stamps who/when and
+a sha256 computed over the spec exactly as it will persist. Downstream stages
+(RC1-546 executor onward) read specs only through `load_approved()`, which
+re-derives the hash and refuses drafts and post-approval edits alike.
+
+**Flagged mappings are register entries.** `spec_risks()` restates each
+flagged mapping as a medium-severity `mapping_open_question` risk, and
+`discovery.report --spec` merges them into the discovery register - one
+severity-ranked log for the whole engagement, as RC1-545 specifies.
+
+**Verified against the seeded ambiguities** (fixtures/README.md): the first
+real proposer run flagged all three - LASTPURCH mixed date formats, the
+overlapping VIP segments (asking exactly the consolidate-or-migrate-both
+question), and the `nonsubscribed` consent bucket - plus the engagement
+segment and ZIP quality issues, with zero guessed targets. Phase 5 turns this
+into a repeatable eval.
+
 ## ADR-0004: Ingest and discovery are deterministic end to end; the LLM narrates last (2026-10-26)
 
 **Decision.** Phase 1 splits into `ingest/` (parsers + typed bundle models) and
