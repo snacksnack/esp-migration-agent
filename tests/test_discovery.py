@@ -83,7 +83,7 @@ def test_proposal_drivers_trace_to_inventory(inventory, risks):
     units = {w.driver: w.units for w in proposal.workstreams}
     assert units["suppression_count"] == inventory.suppression_count == 411
     assert units["members_total"] == inventory.members_total == 4255
-    assert units["segments"] == len(inventory.segments) == 2
+    assert units["segments"] == len(inventory.segments) == 4
     assert units["templates"] == len(inventory.templates) == 2
     assert proposal.total_hours == round(sum(w.est_hours for w in proposal.workstreams), 1)
     assert any("Automations" in o for o in proposal.out_of_scope)

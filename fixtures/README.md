@@ -74,3 +74,23 @@ itself at fixture-freeze time and recorded below when the bundle lands.
   formats.
 - An engagement-based saved segment ("Highly engaged (4-5 stars)") that the
   Listmonk target cannot represent - the seeded unsupported-feature risk.
+
+## Seeded mapping ambiguities (RC1-545)
+
+Added 2026-10-26, before the trial closed, so Phase 2 has ground truth for
+flag-don't-guess. The audience CSVs are untouched; only the API supplement
+was re-captured (saved segments do not alter members).
+
+- **Overlapping VIP segments.** "VIP customers" (1,709 members; LASTPURCH
+  contains "2026") and "VIP (legacy)" (1,712 members; match ANY of the same
+  purchase condition OR ZIP starts "112"). Both TextMerge-only, so each is
+  representable in Listmonk - the open question is which is canonical and
+  whether to consolidate, which no mapper may decide alone. Both also lean on
+  the mixed-format LASTPURCH text field, so the text `contains` condition
+  silently misses non-ISO rows (that is why the counts are not the full 2026
+  purchaser population).
+- **Mixed date formats** in `LASTPURCH` (seeded in RC1-543): normalize-on-
+  migrate vs migrate-as-text is a human decision.
+- **Unclear consent column:** the `nonsubscribed` bucket (88 members) has no
+  self-evident equivalent in the target's consent model; mapping it is a
+  judgment call about marketing-consent semantics.

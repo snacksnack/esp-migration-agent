@@ -60,6 +60,42 @@ SEGMENTS = [
             ],
         },
     },
+    # Deliberate RC1-545 ambiguity: two segments that both claim to be "the
+    # VIP list", with overlapping-but-different membership. Each condition is
+    # TextMerge (representable in Listmonk), so the open question the mapper
+    # must raise is consolidation intent, not representability. Note both lean
+    # on LASTPURCH, the mixed-format free-text date field - a text `contains`
+    # condition over it silently misses non-ISO rows, which compounds the
+    # ambiguity exactly the way real accounts do.
+    {
+        "name": "VIP customers",
+        "options": {
+            "match": "all",
+            "conditions": [
+                {
+                    "condition_type": "TextMerge",
+                    "field": "LASTPURCH",
+                    "op": "contains",
+                    "value": "2026",
+                }
+            ],
+        },
+    },
+    {
+        "name": "VIP (legacy)",
+        "options": {
+            "match": "any",
+            "conditions": [
+                {
+                    "condition_type": "TextMerge",
+                    "field": "LASTPURCH",
+                    "op": "contains",
+                    "value": "2026",
+                },
+                {"condition_type": "TextMerge", "field": "ZIP", "op": "starts", "value": "112"},
+            ],
+        },
+    },
 ]
 
 
