@@ -3,6 +3,37 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0004: Ingest and discovery are deterministic end to end; the LLM narrates last (2026-10-26)
+
+**Decision.** Phase 1 splits into `ingest/` (parsers + typed bundle models) and
+`discovery/` (profile, inventory, risk register, proposal, report). Everything
+that counts, classifies, or detects is pure Python tested against the Phase 0
+ground truth; the only LLM call is `discovery/narrator.py`, which receives the
+computed aggregates - percentages precomputed - and drafts prose. The narration
+payload is the narration's entire world, which is what Phase 5's evals check.
+
+**Consent buckets are named as the source platform names them** (`subscribed /
+unsubscribed / nonsubscribed`), not normalized at ingest. Normalization to the
+target's consent model is a Phase 2 mapping decision a human approves; renaming
+at parse time would hide exactly the decision the review gate exists for.
+
+**Export timestamps are account-local.** Mailchimp renders audience-export
+datetimes in the account's timezone with no offset in the value (verified
+against the fixture's seeded UTC signups: exactly -4h/-5h, EDT/EST). Parsers
+localize with the account timezone and convert to UTC; getting this wrong
+shifts tenure-cohort boundaries, which is how it was caught - the profile test
+against ground truth failed by 2 records at the lt_1y/1_3y boundary.
+
+**Known platform gaps are register entries, not parser workarounds.** The
+audience export omits pending members (244 in the fixture); the risk register
+reports it as a high-severity reconcile-before-cutover item rather than the
+parser inventing rows it cannot see.
+
+**Effort model.** The proposal's per-workstream hours are transparent per-unit
+constants stated inline in `discovery/proposal.py` - planning anchors to adjust
+in review, which is how a real services estimate works. Every driver traces to
+an inventory count (tested).
+
 ## ADR-0003: Mapping spec is YAML validated by pydantic models (2026-10-24)
 
 **Decision.** The stage-4 reviewable document is a single YAML file validated
