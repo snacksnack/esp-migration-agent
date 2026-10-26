@@ -24,6 +24,13 @@ dev = [
 obs = [
     "ddtrace>=4.14,<5",
 ]
+# The shared eval harness (RC1-548), pinned by tag: if the ruler can move
+# under a run, a changed score no longer says whether the subject drifted or
+# the measurement did. v0.6.3 prices claude-opus-5-5 - the model both of this
+# repo's LLM calls use - so run records carry real cost.
+evals = [
+    "agent-evals[sql,llmobs] @ git+https://github.com/snacksnack/agent-evals@v0.6.3",
+]
 
 [tool.uv]
 package = false
