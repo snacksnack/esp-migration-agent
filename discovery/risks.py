@@ -48,6 +48,12 @@ class RiskError(RuntimeError):
     pass
 
 
+def sort_risks(risks: list[Risk]) -> list[Risk]:
+    """One severity-ranked log, however many sources contribute (discovery
+    detections, and from RC1-545 the flagged-mapping open questions)."""
+    return sorted(risks, key=lambda r: _SEVERITY_ORDER[r.severity])
+
+
 def build_risk_register(
     bundle: MailchimpBundle, inventory: Inventory, target: str
 ) -> list[Risk]:
@@ -166,4 +172,4 @@ def build_risk_register(
             )
         )
 
-    return sorted(risks, key=lambda r: _SEVERITY_ORDER[r.severity])
+    return sort_risks(risks)

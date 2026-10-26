@@ -1,0 +1,232 @@
+spec_version: 1
+source: mailchimp
+target: listmonk
+generated_at: '2026-10-26T18:03:09.204188Z'
+status: draft
+field_mappings:
+- confidence: 0.98
+  rationale: EMAIL is the source primary key. Listmonk stores email as a native core
+    subscriber column.
+  status: proposed
+  open_question: null
+  source_field: EMAIL
+  source_type: email
+  sample_values: []
+  target_field: email
+  transform: Copy as-is (trim whitespace, lowercase domain).
+- confidence: 0.85
+  rationale: The listmonk template example references {{ .Subscriber.Attribs.first_name
+    }}, so first_name is the expected attrib key. FNAME has 195 empty values, which
+    makes the name fallback necessary.
+  status: proposed
+  open_question: null
+  source_field: FNAME
+  source_type: text
+  sample_values: []
+  target_field: attribs.first_name
+  transform: Copy as-is into attribs.first_name and leave empty when blank. The required
+    listmonk name column can be populated as trim(FNAME || ' ' || LNAME), falling
+    back to EMAIL when both are empty.
+- confidence: 0.85
+  rationale: This is a plain text field with no format issues reported. Listmonk custom
+    fields live at attribs.<key>, and last_name mirrors the first_name convention.
+  status: proposed
+  open_question: null
+  source_field: LNAME
+  source_type: text
+  sample_values: []
+  target_field: attribs.last_name
+  transform: Copy as-is into attribs.last_name. It also contributes to the composed
+    name column described under FNAME.
+- confidence: 0.3
+  rationale: 'Formats are mixed: 4188 values are 5-digit ZIPs, 40 are non-numeric
+    (e.g. ''ask reid''), and 27 are truncated (e.g. ''1576'', ''1637''). The truncated
+    values are plausibly 5-digit ZIPs whose leading zero was stripped, but the payload
+    does not confirm this.'
+  status: flagged
+  open_question: 'How should the 27 truncated ZIPs be handled: left-pad with zeros
+    to 5 digits, or migrate as-is? How should the 40 non-numeric values be handled:
+    drop them, set them to null, or preserve them in a separate attrib such as zip_raw?
+    Also confirm the target key (e.g. attribs.zip). This choice affects the Brooklyn
+    and VIP (legacy) segments.'
+  source_field: ZIP
+  source_type: text
+  sample_values:
+  - ask reid
+  - 00597
+  - '00636'
+  - '1576'
+  - '1637'
+  target_field: null
+  transform: Pending reviewer decision.
+- confidence: 0.9
+  rationale: All sample values are consistent 2-letter state codes, and no mixed formats
+    were reported. The field maps directly to a custom attrib.
+  status: proposed
+  open_question: null
+  source_field: STATE
+  source_type: text
+  sample_values:
+  - AK
+  - AL
+  - AR
+  target_field: attribs.state
+  transform: Copy as-is (2-letter USPS code).
+- confidence: 0.25
+  rationale: 'Formats are mixed: 3745 values are ISO dates, 367 use another date format
+    such as ''01-07-26'', and 143 are free text such as ''last spring''. The ''01-07-26''
+    style is ambiguous between MM-DD-YY, DD-MM-YY, and YY-MM-DD.'
+  status: flagged
+  open_question: 'Which order do the 367 non-ISO values use (MM-DD-YY, DD-MM-YY, or
+    YY-MM-DD)? Should all values be normalized to ISO YYYY-MM-DD? What should happen
+    to the 143 free-text values: set them to null, or keep them in a raw attrib? Also
+    confirm the target key (e.g. attribs.last_purchase). This choice determines VIP
+    segment membership.'
+  source_field: LASTPURCH
+  source_type: text
+  sample_values:
+  - around the holidays
+  - last spring
+  - '2024-11-23'
+  - '2024-11-24'
+  - 01-07-26
+  - 01-12-26
+  target_field: null
+  transform: Pending reviewer decision.
+- confidence: 0.3
+  rationale: MEMBER_RATING is a source-computed engagement score, and target_notes
+    state listmonk has no engagement or rating signal. The only value observed is
+    2, so a copied value would be static and carry no information.
+  status: flagged
+  open_question: Should MEMBER_RATING be dropped, or preserved as a frozen historical
+    value (e.g. attribs.mc_member_rating) with the understanding that it will never
+    update in listmonk?
+  source_field: MEMBER_RATING
+  source_type: integer
+  sample_values:
+  - '2'
+  target_field: null
+  transform: Pending reviewer decision.
+- confidence: 0.85
+  rationale: Values are already normalized to UTC, so the format is unambiguous. Opt-in
+    timestamps are useful consent evidence, and listmonk has no native column for
+    them.
+  status: proposed
+  open_question: null
+  source_field: OPTIN_TIME
+  source_type: datetime
+  sample_values: []
+  target_field: attribs.optin_time
+  transform: Write as an ISO 8601 UTC string (values are already parsed to UTC at
+    ingest).
+- confidence: 0.85
+  rationale: Values are already normalized to UTC. Preserving the confirmation timestamp
+    supports the confirmed subscription status proposed for subscribed contacts.
+  status: proposed
+  open_question: null
+  source_field: CONFIRM_TIME
+  source_type: datetime
+  sample_values: []
+  target_field: attribs.confirm_time
+  transform: Write as an ISO 8601 UTC string (values are already parsed to UTC at
+    ingest).
+merge_tag_mappings:
+- source_tag: ARCHIVE
+  target_tag: '{{ MessageURL }}'
+- source_tag: FNAME
+  target_tag: '{{ .Subscriber.Attribs.first_name }}'
+- source_tag: LASTPURCH
+  target_tag: 'FLAGGED: depends on unresolved LASTPURCH field mapping (target attrib
+    key and normalization pending reviewer decision)'
+- source_tag: LNAME
+  target_tag: '{{ .Subscriber.Attribs.last_name }}'
+- source_tag: STATE
+  target_tag: '{{ .Subscriber.Attribs.state }}'
+- source_tag: UNSUB
+  target_tag: '{{ UnsubscribeURL }}'
+- source_tag: ZIP
+  target_tag: 'FLAGGED: depends on unresolved ZIP field mapping (target attrib key
+    and cleanup pending reviewer decision)'
+segment_mappings:
+- confidence: 0.4
+  rationale: The query shape is straightforward (attribs->>'<zip_key>' LIKE '112%'),
+    but the ZIP field is flagged and the attrib key is unresolved. If truncated ZIPs
+    are left unpadded, values like '1123x' could falsely match. The segment currently
+    has 4 members.
+  status: flagged
+  open_question: Once the ZIP cleanup is decided, confirm the query should be subscribers.attribs->>'<zip_key>'
+    LIKE '112%'. Should truncated or non-numeric ZIPs be explicitly excluded from
+    this segment?
+  source_segment: Brooklyn subscribers
+  source_logic: All contacts whose ZIP text starts with '112'.
+  target_query: null
+- confidence: 0.2
+  rationale: Target_notes state listmonk has no engagement or rating signal to query.
+    The segment has 0 members, and MEMBER_RATING only shows the value 2.
+  status: flagged
+  open_question: There is no faithful listmonk equivalent and the segment is empty.
+    Should it be dropped, recreated as a static query on a frozen attribs.mc_member_rating
+    (if that field is kept), or replaced with a different engagement definition?
+  source_segment: Highly engaged (4-5 stars)
+  source_logic: All contacts whose Mailchimp member rating is greater than 3 (4 or
+    5 stars).
+  target_query: null
+- confidence: 0.3
+  rationale: The rule depends on LASTPURCH, which is flagged for mixed formats. Values
+    like '01-07-26' do not contain the literal '2026' today but might after normalization,
+    so the current 1709-member count would change.
+  status: flagged
+  open_question: Is the intent 'last purchase in 2026'? If so, should the target query
+    be a date comparison on the normalized attrib, e.g. (subscribers.attribs->>'<lastpurch_key>')
+    >= '2026-01-01'? Or should the literal text-contains behavior be preserved, accepting
+    a different membership than the source's 1709?
+  source_segment: VIP customers
+  source_logic: All contacts whose LASTPURCH text contains '2026'.
+  target_query: null
+- confidence: 0.25
+  rationale: 'This segment overlaps ''VIP customers'': it has 1712 members versus
+    1709 and differs only by an OR on the Brooklyn ZIP rule (4 members). It also depends
+    on both flagged fields, ZIP and LASTPURCH.'
+  status: flagged
+  open_question: This segment nearly duplicates 'VIP customers'. Should it be migrated
+    separately, merged into 'VIP customers', or dropped as legacy?
+  source_segment: VIP (legacy)
+  source_logic: Any contact whose LASTPURCH text contains '2026' OR whose ZIP starts
+    with '112'.
+  target_query: null
+consent_mappings:
+- confidence: 0.85
+  rationale: The 3756 subscribed contacts have opted in to marketing, and the source
+    captures OPTIN_TIME and CONFIRM_TIME. Importing them as confirmed avoids re-triggering
+    double opt-in emails.
+  status: proposed
+  open_question: null
+  source_status: subscribed
+  target_status: 'subscriber status: enabled; list subscription: confirmed'
+- confidence: 0.5
+  rationale: There are 411 unsubscribed contacts, exactly matching suppression_count
+    (411). Listmonk offers either a global blocklisted subscriber status or a per-list
+    unsubscribed status, and the payload does not say which scope the reviewer intends.
+  status: flagged
+  open_question: Should the 411 unsubscribed contacts be blocklisted (globally suppressed
+    across all listmonk lists, which is safest), or kept enabled with the list subscription
+    set to unsubscribed (allowing future opt-in to other lists)?
+  source_status: unsubscribed
+  target_status: null
+- confidence: 0.3
+  rationale: 'The 88 nonsubscribed contacts never opted in to marketing (Mailchimp
+    transactional contacts). Listmonk has no faithful equivalent: ''unconfirmed''
+    may trigger opt-in emails, and ''confirmed'' would imply consent that does not
+    exist.'
+  status: flagged
+  open_question: 'How should the 88 nonsubscribed contacts be handled: exclude them
+    from the import, import them as blocklisted, or import them as unconfirmed (which
+    risks sending opt-in requests to people who never subscribed)?'
+  source_status: nonsubscribed
+  target_status: null
+suppressions:
+  order: before_subscribers
+  source_statuses:
+  - unsubscribed
+  - cleaned
+approval: null

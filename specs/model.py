@@ -18,6 +18,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+def hash_content(content: dict) -> str:
+    """Canonical hash of a spec's reviewed content; shared by content_sha256
+    and the review gate so both sides pin exactly the same bytes."""
+    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+
 class MappingStatus(StrEnum):
     PROPOSED = "proposed"  # LLM output, untouched
     APPROVED = "approved"  # reviewer accepted as proposed
@@ -149,10 +155,7 @@ class MappingSpec(BaseModel):
     def content_sha256(self) -> str:
         """Hash of the reviewed content (everything except the approval block),
         pinned into Approval so the executor runs exactly what was signed off."""
-        content = self.model_dump(mode="json", exclude={"approval"})
-        return hashlib.sha256(
-            json.dumps(content, sort_keys=True).encode()
-        ).hexdigest()
+        return hash_content(self.model_dump(mode="json", exclude={"approval"}))
 
     @classmethod
     def from_yaml(cls, text: str) -> MappingSpec:

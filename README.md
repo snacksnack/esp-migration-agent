@@ -39,7 +39,13 @@ The schema cannot even represent a spec that violates it
 
 ## Layout
 
-- `specs/` - mapping-spec schema (pydantic) + worked example YAML (ADR-0003)
+- `specs/` - mapping-spec schema (pydantic), worked example YAML (ADR-0003),
+  and generated drafts under `specs/drafts/`
+- `ingest/` - deterministic Mailchimp export-bundle parsers (ADR-0004)
+- `discovery/` - audience profile, inventory, risk register, proposal, and
+  the rendered report; the LLM only narrates computed aggregates
+- `mapping/` - the LLM mapping proposer and the human review gate (ADR-0005);
+  `mapping.gate.load_approved` is the only door downstream stages read through
 - `seeding/` - deterministic subscriber generator + Mailchimp seeder, and the
   `ground_truth.json` the discovery stage is verified against
 - `fixtures/` - the synthetic export bundle (see fixtures/README.md)
@@ -51,6 +57,11 @@ The schema cannot even represent a spec that violates it
 uv sync                                       # install
 uv run ruff check . && uv run pytest          # checks (same as CI)
 uv run python -m seeding.mailchimp_seeder --dry-run   # regenerate ground truth
+uv run python -m discovery.report [--narrate] [--spec SPEC.yaml]  # stage 2
+uv run python -m mapping.review propose       # stage 3 (draft spec)
+uv run python -m mapping.review status SPEC.yaml      # stage 4 (review)
+uv run python -m mapping.review approve SPEC.yaml --by "Name"
 ```
 
-Work is tracked under Jira epic RC1-542 (this scaffold: RC1-543).
+Work is tracked under Jira epic RC1-542 (scaffold: RC1-543; ingest +
+discovery: RC1-544; mapping + review gate: RC1-545).
