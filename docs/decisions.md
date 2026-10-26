@@ -3,6 +3,29 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0009: The eval measures flag discipline from both sides (2026-10-26)
+
+**Decision.** The agent-evals subject `esp-mapping-quality` (RC1-548) runs the
+shipped proposer call (`request_mapping`, same prompt/model/limits/validation)
+against two frozen payloads and scores deterministically - no judge:
+
+- **fixture-ambiguities** - the real fixture payload; the three seeded
+  ambiguities (ZIP formats, LASTPURCH formats, the overlapping VIP segment)
+  must come back flagged: flag *recall*.
+- **clean-variant** - the same account with the ambiguities removed; ZIP and
+  LASTPURCH must come back proposed: flag *precision*. A proposer that flags
+  everything aces recall and is useless; only the pair measures the contract.
+
+Ground truth is three-way (`evals/expectations.py`): must_flag, must_propose
+(with deliberately loose target predicates - the concept is pinned, the
+reviewer's attrib spelling is not), and judgment calls (MEMBER_RATING, the
+consent-scope questions, segments inheriting flagged fields), which are
+advisory and never gate - a flaky gate gets disabled within a week. Payloads
+are frozen JSON, not rebuilt from the fixture, so a fixture change cannot
+silently move the ruler. Published numbers (mapping_accuracy, flag_recall,
+flag_precision) ride in each result's observations. Eval traces go to the same
+ml_app under `service:evals`, excluded from the production cost monitor.
+
 ## ADR-0008: Observability is decoration; a tag is the release (2026-10-26)
 
 **Decision.** Phase 5 (RC1-548) adds `telemetry/`: Datadog LLM Obs tracing for

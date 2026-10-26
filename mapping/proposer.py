@@ -86,6 +86,11 @@ class ProposalError(RuntimeError):
     pass
 
 
+#: Bump when SYSTEM_PROMPT changes, so an eval regression is attributable to
+#: the prompt rather than guessed at (RC1-548; run records carry it).
+PROMPT_VERSION = "1"
+
+
 class ProposerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ESP_", env_file=".env", extra="ignore")
 
@@ -207,12 +212,18 @@ def assemble_spec(model_output: dict, source: str, target: str) -> MappingSpec:
     return spec
 
 
-def propose(bundle: MailchimpBundle, inventory: Inventory, target: str) -> MappingSpec:
+def request_mapping(payload: dict):
+    """The raw model call on a prepared payload, returning the API response.
+
+    Split from `propose` so the Phase 5 eval subject (RC1-548) exercises
+    exactly the shipped call - same settings, prompt, limits, and error
+    mapping - against its frozen case payloads, while keeping the response's
+    usage counts for the run record.
+    """
     settings = ProposerSettings()
     if not settings.anthropic_api_key:
         raise ProposalError("ESP_ANTHROPIC_API_KEY is not set (see .env.example)")
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-    payload = mapping_payload(bundle, inventory, target)
     try:
         response = client.messages.create(
             model=settings.anthropic_model,
@@ -236,7 +247,17 @@ def propose(bundle: MailchimpBundle, inventory: Inventory, target: str) -> Mappi
         raise ProposalError("mapping proposal request was refused")
     if response.stop_reason == "max_tokens":
         raise ProposalError("proposal truncated at max_tokens; raise the limit")
+    return response
+
+
+def response_text(response) -> str:
     text = "".join(block.text for block in response.content if block.type == "text")
     if not text.strip():
         raise ProposalError("empty proposer response")
-    return assemble_spec(_parse_json(text), source="mailchimp", target=target)
+    return text
+
+
+def propose(bundle: MailchimpBundle, inventory: Inventory, target: str) -> MappingSpec:
+    payload = mapping_payload(bundle, inventory, target)
+    response = request_mapping(payload)
+    return assemble_spec(_parse_json(response_text(response)), source="mailchimp", target=target)

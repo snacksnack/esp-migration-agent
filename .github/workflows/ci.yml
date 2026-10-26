@@ -19,15 +19,20 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
+      # --all-groups: the scorer tests import agent_evals and telemetry's
+      # decline path is still what runs (no DD_API_KEY at module scope, no
+      # LLM key at all). The billed suite itself (`python -m evals`) never
+      # runs in CI.
       - name: Sync
-        run: uv sync
+        run: uv sync --all-groups
 
       - name: Lint (ruff)
         run: uv run ruff check .
 
-      # --ddtrace reports test-level results to Test Optimization, agentless;
-      # --cov adds lines_pct. Coverage is a signal, not a gate. Not a test
-      # credential: the suite passes identically with no key.
+      # --ddtrace reports test-level results to Test Optimization, agentless
+      # (ddtrace comes from the obs group now); --cov adds lines_pct.
+      # Coverage is a signal, not a gate. Not a test credential: the suite
+      # passes identically with no key.
       - name: Tests
         env:
           DD_API_KEY: ${{ secrets.DD_API_KEY }}
@@ -35,7 +40,7 @@ jobs:
           DD_SITE: datadoghq.com
           DD_SERVICE: esp-migration-agent
           DD_ENV: ci
-        run: uv run --with "ddtrace>=4.14,<5" pytest --ddtrace --cov
+        run: uv run pytest --ddtrace --cov
 
   # RC1-546: the full fixture into a real Listmonk, reconciliation at 100%,
   # second run converging to zero writes. Runs on every push, same as units -
@@ -51,8 +56,10 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
+      # --all-groups: pytest collects every test module before -m deselects,
+      # so the scorer tests' agent_evals import must resolve here too.
       - name: Sync
-        run: uv sync
+        run: uv sync --all-groups
 
       - name: Start Listmonk
         run: docker compose up -d --wait
