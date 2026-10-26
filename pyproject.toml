@@ -33,6 +33,9 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
+markers = [
+    "integration: end-to-end against a real target (skipped unless ESP_LISTMONK_* env is set)",
+]
 
 [tool.coverage.run]
 source = ["specs", "seeding", "ingest", "discovery"]

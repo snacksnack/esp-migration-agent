@@ -37,6 +37,13 @@ proposes, deterministic Python validates, a human approves.
   assembles the spec shell, and pre-resolved output is a ProposalError.
   `gate.py::load_approved` is the ONLY door downstream stages read a spec
   through. The review CLI is `python -m mapping.review`.
+- `executor/` - Phase 3 (ADR-0006): plan builder, Listmonk adapter behind a
+  target protocol, diff/execute engine, reconciliation, cutover plan,
+  dev-target bootstrap. The suppression invariant is checked at plan build,
+  per write, and at reconciliation (100%, enumerated). Dry-run is the
+  default (`python -m executor.run --spec ...`); writes need --execute.
+  Integration tests (`pytest -m integration`) need the docker-compose
+  Listmonk and read env from the process only, never .env.
 - `seeding/generator.py` - pure, seeded subscriber generator returning records
   plus expected aggregates (the ground truth for RC1-544).
 - `seeding/mailchimp_seeder.py` - API uploader; needs `ESP_MAILCHIMP_API_KEY`.
