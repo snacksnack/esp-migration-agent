@@ -3,6 +3,65 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0006: The executor plans everything before writing anything (2026-10-26)
+
+**Decision.** Phase 3 lives in `executor/`: a pure plan builder (`plan.py`),
+a target protocol with the Listmonk adapter and an offline stand-in
+(`target.py`, `listmonk.py`), diff + execution (`engine.py`), reconciliation
+(`reconcile.py`), the cutover-plan artifact (`cutover.py`), and the dev-target
+API-user bootstrap (`bootstrap.py`).
+
+**The invariant is enforced three times, deliberately.** (1) `build_plan`
+raises `SuppressionViolationError` while transforming - a hostile approved
+spec that maps a suppressed bucket to a subscribable consent state never
+yields a plan; the executor refuses rather than silently overriding, because
+the reviewer must see the inconsistency. (2) The write loop re-checks per
+record before every write. (3) Reconciliation enumerates every suppressed
+address in the target - never sampled - and fails below 100%.
+
+**Plan first, write second.** The full plan - every record transformed, every
+consent label resolved against the target dialect - exists before the first
+API call. Dry-run is the default; `--execute` is opt-in. Phases are
+structural: suppressions are a separate list the write loop drains first.
+
+**Idempotency is upsert-by-key plus convergence checks.** Subscribers key on
+email, campaigns on name; a record matching the desired state (on the fields
+the executor owns - target-side extras are ignored) is skipped. A second run
+writes nothing; a crashed half-run converges on re-run. This is what makes
+the delta pass and rollback-re-run in the cutover plan safe.
+
+**Consent dialect lives with the executor** (per ADR-0002): the canonical
+labels (`enabled/confirmed`, `enabled/unconfirmed`, `unsubscribed`,
+`blocklisted`) map to Listmonk (status, subscription, subscribable) in
+`CONSENT_DIALECTS`. `subscribable` is strict - unconfirmed counts as
+subscribable for the invariant, because a confirm click is not suppression.
+
+**Segments execute as verification queries, not target objects.** Listmonk
+has no saved-segment entity; the approved queries are counted in
+reconciliation against the same predicate evaluated in Python over the plan
+(a deliberately tiny evaluator that refuses shapes it does not know). Source
+counts are shown as reference only: the spec may deliberately change
+semantics, and the report says which.
+
+**Review resolutions for the fixture spec** (the 9 RC1-545 open questions,
+resolved in `specs/drafts/mailchimp_to_listmonk.resolved.yaml` and approved):
+ZIP zero-pads numerics (`zero_pad_us_zip`), non-numerics migrate as-is (the
+risk register already carries them); LASTPURCH migrates as text (`attribs.
+last_purchase` - the format question is answered by not parsing); MEMBER_
+RATING freezes as `attribs.mc_member_rating`; Brooklyn keeps the zip LIKE;
+"Highly engaged" recreates on the frozen rating (stays empty, matching the
+source's 0); both VIP segments migrate separately with literal text-contains
+semantics (consolidation is the customer's post-cutover call); subscribed ->
+enabled/confirmed; unsubscribed -> blocklisted (global, safest); nonsubscribed
+-> enabled/unconfirmed on a double-opt-in list (retained, never mailable
+without confirm, and the import itself triggers no opt-in email).
+
+**Dev-target auth.** Listmonk's API takes API-user tokens (the admin password
+is login-only), so `executor/bootstrap.py` creates the API user once per
+fresh container - locally via `--export`, in CI appended to `$GITHUB_ENV`.
+The e2e job runs on every push: a migration engine whose end-to-end only runs
+on demand is not tested.
+
 ## ADR-0005: The proposer only proposes; the gate owns resolution (2026-10-26)
 
 **Decision.** Phase 2 lives in `mapping/`: the LLM proposer
