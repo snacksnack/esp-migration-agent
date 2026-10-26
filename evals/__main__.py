@@ -22,6 +22,7 @@ from agent_evals.runner import UnknownCase, exit_code, print_result, record_run,
 
 from evals import subject
 from mapping.proposer import ProposalError, ProposerSettings
+from telemetry.llmobs import apply_version
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     # pane shows one row per agent, `service:evals` so these runs stay out of
     # the production spend guardrails and the RC1-548 cost monitor. A no-op
     # without DD_API_KEY.
+    apply_version()  # or the eval traces index with an empty version tag
     llmobs.enable("esp-migration-agent", service="evals")
     started = datetime.now(UTC)
     results = []

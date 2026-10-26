@@ -49,6 +49,21 @@ def package_version() -> str:
         return tomllib.load(handle)["project"]["version"]
 
 
+def apply_version() -> str:
+    """Set DD_VERSION and ddtrace's own config to the package version.
+
+    ddtrace reads DD_VERSION at import time, which is before any of this code
+    runs - set only the env var and the version tag goes out empty (measured:
+    the first traced run indexed with version:"", exactly the RC1-407 drop
+    this guards). Setting `config.version` works post-import. Also called by
+    the eval CLI, whose tracing is agent-evals' enable, not ours.
+    """
+    version = os.environ.setdefault("DD_VERSION", package_version())
+    if _dd_config is not None and not _dd_config.version:
+        _dd_config.version = version
+    return version
+
+
 def active() -> bool:
     """Whether `enable_llmobs()` has run and succeeded in this process."""
     return _enabled
@@ -65,12 +80,7 @@ def enable_llmobs(*, service: str | None = None) -> bool:
         return True
     if LLMObs is None or not os.environ.get("DD_API_KEY"):
         return False
-    # ddtrace read DD_VERSION at import time, before this ran; set the config
-    # directly or the version tag goes out empty (measured: the first traced
-    # run indexed with version:"", exactly the RC1-407 drop this guards).
-    os.environ.setdefault("DD_VERSION", package_version())
-    if not _dd_config.version:
-        _dd_config.version = os.environ["DD_VERSION"]
+    apply_version()
     _restrict_patching_to_anthropic()
     try:
         LLMObs.enable(
