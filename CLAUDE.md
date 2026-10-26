@@ -27,6 +27,11 @@ proposes, deterministic Python validates, a human approves.
 
 - `specs/model.py` - mapping-spec schema (ADR-0003); worked example in
   `specs/examples/`, validated by tests.
+- `ingest/` - deterministic Mailchimp export-bundle parsers + typed models
+  (ADR-0004). Export timestamps are account-local; parsers convert to UTC.
+- `discovery/` - audience profile, inventory, risk register, proposal, and
+  the rendered report (`python -m discovery.report`). The only LLM call is
+  `narrator.py`, which narrates precomputed aggregates and nothing else.
 - `seeding/generator.py` - pure, seeded subscriber generator returning records
   plus expected aggregates (the ground truth for RC1-544).
 - `seeding/mailchimp_seeder.py` - API uploader; needs `ESP_MAILCHIMP_API_KEY`.
