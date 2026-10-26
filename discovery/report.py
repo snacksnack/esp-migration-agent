@@ -45,7 +45,7 @@ class DiscoveryReport(BaseModel):
     narration: str | None = None
 
 
-def _ramp_recommendation(profile: AudienceProfile) -> str:
+def ramp_recommendation(profile: AudienceProfile) -> str:
     """Stretch: warm-up ramp guidance from the engagement distribution.
 
     Standard practice is to ramp the new sending domain with the most-engaged
@@ -81,7 +81,7 @@ def build_report(
         profile=profile,
         risks=risks,
         proposal=build_proposal(inventory, risks),
-        ramp_recommendation=_ramp_recommendation(profile),
+        ramp_recommendation=ramp_recommendation(profile),
         narration=narration,
     )
 

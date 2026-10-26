@@ -1,0 +1,52 @@
+# Local/CI dev target (ADR-0002): Listmonk + Postgres. Used by the RC1-546
+# integration tests (pytest -m integration) and the live demo.
+#
+#   docker compose up -d        # install is idempotent; admin creds below
+#   ESP_LISTMONK_URL=http://localhost:9000 \
+#   ESP_LISTMONK_USERNAME=admin ESP_LISTMONK_PASSWORD=listmonk-admin \
+#     uv run pytest -m integration
+#
+# Synthetic fixture data only; these credentials guard an empty local demo
+# target and are deliberately not secrets.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: listmonk
+      POSTGRES_PASSWORD: listmonk
+      POSTGRES_DB: listmonk
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U listmonk"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    image: listmonk/listmonk:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "9000:9000"
+    environment:
+      LISTMONK_app__address: 0.0.0.0:9000
+      LISTMONK_db__host: db
+      LISTMONK_db__port: "5432"
+      LISTMONK_db__user: listmonk
+      LISTMONK_db__password: listmonk
+      LISTMONK_db__database: listmonk
+      LISTMONK_db__ssl_mode: disable
+      LISTMONK_ADMIN_USER: admin
+      LISTMONK_ADMIN_PASSWORD: listmonk-admin
+    command:
+      [
+        "sh",
+        "-c",
+        "./listmonk --install --idempotent --yes --config '' && ./listmonk --config ''",
+      ]
+    healthcheck:
+      # The login page serves unauthenticated once the app is up.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9000/admin/login"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
