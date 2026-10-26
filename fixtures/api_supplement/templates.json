@@ -1,0 +1,16 @@
+[
+  {
+    "id": 13634407,
+    "name": "Monthly newsletter",
+    "type": "user",
+    "drag_and_drop": false,
+    "date_created": "2026-10-25T23:51:17+00:00"
+  },
+  {
+    "id": 13634408,
+    "name": "Promo blast",
+    "type": "user",
+    "drag_and_drop": false,
+    "date_created": "2026-10-25T23:51:17+00:00"
+  }
+]

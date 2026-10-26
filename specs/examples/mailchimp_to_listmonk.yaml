@@ -1,0 +1,112 @@
+# Worked example of a mapping spec (ADR-0003), as the LLM would draft it after
+# discovery and before human review: two mappings are flagged with open
+# questions rather than guessed. Validated in CI by tests/test_mapping_spec.py.
+spec_version: 1
+source: mailchimp
+target: listmonk
+generated_at: "2026-10-24T12:00:00Z"
+status: draft
+
+field_mappings:
+  - source_field: EMAIL
+    source_type: email
+    target_field: email
+    transform: lowercase
+    confidence: 1.0
+    rationale: Primary key on both sides; Listmonk stores emails lowercased.
+    status: proposed
+  - source_field: FNAME
+    source_type: text
+    sample_values: ["Maria", "James", ""]
+    target_field: attribs.first_name
+    transform: none
+    confidence: 0.98
+    rationale: Standard Mailchimp first-name merge field; Listmonk custom attribute.
+    status: proposed
+  - source_field: LNAME
+    source_type: text
+    target_field: attribs.last_name
+    transform: none
+    confidence: 0.98
+    rationale: Standard Mailchimp last-name merge field.
+    status: proposed
+  - source_field: ZIP
+    source_type: zip
+    sample_values: ["11215", "7302", "ask reid"]
+    target_field: attribs.zip
+    transform: zero_pad_us_zip
+    confidence: 0.7
+    rationale: >
+      Mostly valid US zips, but samples include a 4-digit value (leading zero
+      lost upstream) and free text. Zero-pad numerics; non-conforming values
+      noted in the risk register.
+    status: proposed
+  - source_field: LAST_PURCH
+    source_type: text
+    sample_values: ["2026-01-15", "Jan 3 2025", "15/02/2026", "last spring"]
+    transform: none
+    confidence: 0.4
+    rationale: >
+      Free-text field holding dates in at least three formats plus prose.
+      Parsing "15/02/2026" requires knowing day-first vs month-first intent,
+      and prose values cannot be parsed at all. Not guessing.
+    status: flagged
+    open_question: >
+      LAST_PURCH mixes date formats (ISO, US prose, possibly day-first) and
+      free text. Should it migrate as an untyped string attribute, be parsed
+      with a declared day-first/month-first rule (unparseable values null), or
+      be dropped?
+
+merge_tag_mappings:
+  - source_tag: "*|FNAME|*"
+    target_tag: "{{ .Subscriber.Attribs.first_name }}"
+  - source_tag: "*|EMAIL|*"
+    target_tag: "{{ .Subscriber.Email }}"
+  - source_tag: "*|UNSUB|*"
+    target_tag: "{{ UnsubscribeURL }}"
+
+segment_mappings:
+  - source_segment: Brooklyn subscribers
+    source_logic: 'merge field ZIP starts with "112"'
+    target_query: subscribers.attribs->>'zip' LIKE '112%'
+    confidence: 0.95
+    rationale: Direct translation to a Listmonk SQL segment over attribs.
+    status: proposed
+  - source_segment: Highly engaged (4-5 stars)
+    source_logic: "member_rating greater than 3"
+    confidence: 0.3
+    rationale: >
+      Mailchimp member_rating is a proprietary engagement score computed from
+      campaign activity; Listmonk has no equivalent signal to query. Any
+      translation would silently change who is in the segment.
+    status: flagged
+    open_question: >
+      Listmonk cannot represent engagement-score segments. Freeze membership
+      at cutover (migrate the member list as a static Listmonk list), or drop
+      the segment and rebuild engagement data natively after migration?
+
+consent_mappings:
+  - source_status: subscribed
+    target_status: enabled/confirmed
+    confidence: 0.95
+    rationale: Opted-in members; double-opt-in state preserved as confirmed.
+    status: proposed
+  - source_status: pending
+    target_status: enabled/unconfirmed
+    confidence: 0.9
+    rationale: Signed up, never confirmed; Listmonk's unconfirmed state matches.
+    status: proposed
+  - source_status: unsubscribed
+    target_status: unsubscribed
+    confidence: 1.0
+    rationale: Must never become mailable; also covered by the suppression policy.
+    status: proposed
+  - source_status: cleaned
+    target_status: blocklisted
+    confidence: 0.9
+    rationale: Hard-bounced addresses; blocklist prevents re-import as mailable.
+    status: proposed
+
+suppressions:
+  order: before_subscribers
+  source_statuses: [unsubscribed, cleaned]

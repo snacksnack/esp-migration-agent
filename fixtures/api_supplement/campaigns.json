@@ -1,0 +1,128 @@
+[
+  {
+    "id": "c229d4f525",
+    "status": "save",
+    "type": "regular",
+    "settings": {
+      "subject_line": "Your October update",
+      "title": "October newsletter",
+      "from_name": "The Dispatch Shop",
+      "reply_to": "owner@redacted.invalid",
+      "use_conversation": false,
+      "to_name": "",
+      "folder_id": "",
+      "authenticate": true,
+      "auto_footer": false,
+      "inline_css": false,
+      "auto_tweet": false,
+      "fb_comments": true,
+      "timewarp": false,
+      "template_id": 13634407,
+      "user_template_id": 13634407,
+      "drag_and_drop": false
+    },
+    "recipients": {
+      "list_id": "098ffa7269",
+      "list_is_active": true,
+      "list_name": "hirereidcollins",
+      "segment_text": "",
+      "recipient_count": 3756
+    },
+    "content": {
+      "plain_text": "** The Monthly Dispatch\n------------------------------------------------------------\n\nHi *|FNAME|*,\n\nHere is what's new this month for our readers in *|STATE|*.\n\nYour last purchase was on *|LASTPURCH|* - we picked a few things you might like since then.\n\n- The Dispatch team\n------------------------------------------------------------\n\nUnsubscribe (*|UNSUB|*) | View in browser (*|ARCHIVE|*)",
+      "html": "<!doctype html>\n<html><body>\n<h1>The Monthly Dispatch</h1>\n<p>Hi *|FNAME|*,</p>\n<p>Here is what's new this month for our readers in *|STATE|*.</p>\n<p>Your last purchase was on *|LASTPURCH|* - we picked a few things\nyou might like since then.</p>\n<p>- The Dispatch team</p>\n<hr>\n<p><a href=\"*|UNSUB|*\">Unsubscribe</a> | <a href=\"*|ARCHIVE|*\">View in browser</a></p>\n</body></html>\n"
+    }
+  },
+  {
+    "id": "06d8cffee6",
+    "status": "save",
+    "type": "regular",
+    "settings": {
+      "subject_line": "Free delivery in your area",
+      "title": "Brooklyn free delivery",
+      "from_name": "The Dispatch Shop",
+      "reply_to": "owner@redacted.invalid",
+      "use_conversation": false,
+      "to_name": "",
+      "folder_id": "",
+      "authenticate": true,
+      "auto_footer": false,
+      "inline_css": false,
+      "auto_tweet": false,
+      "fb_comments": true,
+      "timewarp": false,
+      "template_id": 13634408,
+      "user_template_id": 13634408,
+      "drag_and_drop": false
+    },
+    "recipients": {
+      "list_id": "098ffa7269",
+      "list_is_active": true,
+      "list_name": "hirereidcollins",
+      "segment_text": "<p class=\"!margin--lv0 display--inline\">Contacts that match <strong>all</strong> of the following conditions:</p><ol id=\"conditions\" class=\"small-meta text-transform--none\"><li class=\"margin--lv1 !margin-left-right--lv0\">Zip code starts with  112</li></ol><span>For a total of <strong>0</strong> emails sent.</span>",
+      "recipient_count": 0,
+      "segment_opts": {
+        "saved_segment_id": 6401371,
+        "match": "all",
+        "conditions": [
+          {
+            "condition_type": "TextMerge",
+            "field": "ZIP",
+            "op": "starts",
+            "value": "112"
+          }
+        ]
+      }
+    },
+    "content": {
+      "plain_text": "** A deal just for you, *|FNAME|* *|LNAME|*\n------------------------------------------------------------\n\nShoppers near *|ZIP|* get free delivery this week.\n\nShop the sale (https://shop.example.test/deals)\n------------------------------------------------------------\n\nUnsubscribe (*|UNSUB|*)",
+      "html": "<!doctype html>\n<html><body>\n<h1>A deal just for you, *|FNAME|* *|LNAME|*</h1>\n<p>Shoppers near *|ZIP|* get free delivery this week.</p>\n<p><a href=\"https://shop.example.test/deals\">Shop the sale</a></p>\n<hr>\n<p><a href=\"*|UNSUB|*\">Unsubscribe</a></p>\n</body></html>\n"
+    }
+  },
+  {
+    "id": "e9b148dcb4",
+    "status": "save",
+    "type": "regular",
+    "settings": {
+      "subject_line": "We miss you",
+      "title": "VIP re-engagement",
+      "from_name": "The Dispatch Shop",
+      "reply_to": "owner@redacted.invalid",
+      "use_conversation": false,
+      "to_name": "",
+      "folder_id": "",
+      "authenticate": true,
+      "auto_footer": false,
+      "inline_css": false,
+      "auto_tweet": false,
+      "fb_comments": true,
+      "timewarp": false,
+      "template_id": 13634408,
+      "user_template_id": 13634408,
+      "drag_and_drop": false
+    },
+    "recipients": {
+      "list_id": "098ffa7269",
+      "list_is_active": true,
+      "list_name": "hirereidcollins",
+      "segment_text": "<p class=\"!margin--lv0 display--inline\">Contacts that match <strong>all</strong> of the following conditions:</p><ol id=\"conditions\" class=\"small-meta text-transform--none\"><li class=\"margin--lv1 !margin-left-right--lv0\">Contact rating is greater than  3</li></ol><span>For a total of <strong>0</strong> emails sent.</span>",
+      "recipient_count": 0,
+      "segment_opts": {
+        "saved_segment_id": 6401372,
+        "match": "all",
+        "conditions": [
+          {
+            "condition_type": "MemberRating",
+            "field": "rating",
+            "op": "greater",
+            "value": 3
+          }
+        ]
+      }
+    },
+    "content": {
+      "plain_text": "** A deal just for you, *|FNAME|* *|LNAME|*\n------------------------------------------------------------\n\nShoppers near *|ZIP|* get free delivery this week.\n\nShop the sale (https://shop.example.test/deals)\n------------------------------------------------------------\n\nUnsubscribe (*|UNSUB|*)",
+      "html": "<!doctype html>\n<html><body>\n<h1>A deal just for you, *|FNAME|* *|LNAME|*</h1>\n<p>Shoppers near *|ZIP|* get free delivery this week.</p>\n<p><a href=\"https://shop.example.test/deals\">Shop the sale</a></p>\n<hr>\n<p><a href=\"*|UNSUB|*\">Unsubscribe</a></p>\n</body></html>\n"
+    }
+  }
+]
