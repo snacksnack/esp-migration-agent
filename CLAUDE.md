@@ -48,6 +48,12 @@ proposes, deterministic Python validates, a human approves.
   from the process only, never .env; listmonk e2e runs in CI, brevo is a
   manual demo asset.
 - `scripts/demo.sh` + `docs/demo.md` - the recorded two-minute demo arc.
+- `telemetry/` - LLM Obs tracing + esp_migration.* run metrics (ADR-0008).
+  Decoration by contract: no ddtrace (`uv sync --group obs`) or no DD_API_KEY
+  in the process env means quiet no-ops; a failed POST is loud on stderr but
+  never raises. ml_app `esp-migration-agent`; DD_VERSION defaults to the
+  pyproject version so root-span tags index (RC1-407). A pushed v* tag is the
+  release (`release.yml`): gates, then DORA deployment/failure events.
 - `seeding/generator.py` - pure, seeded subscriber generator returning records
   plus expected aggregates (the ground truth for RC1-544).
 - `seeding/mailchimp_seeder.py` - API uploader; needs `ESP_MAILCHIMP_API_KEY`.

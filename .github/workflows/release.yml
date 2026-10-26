@@ -1,0 +1,88 @@
+name: Release
+
+# A pushed v* tag is the release (the agent-evals pattern, RC1-459): nothing
+# here deploys to infrastructure, so the tag is the moment a version becomes
+# the demo-able artifact. The job proves the tag names a version that lints
+# and tests clean, then reports it to Datadog DORA - the estate-standard
+# Actions -> Datadog deploy path (RC1-548). Tests also run in ci.yml on the
+# same push; the gates here are what the DORA events key off.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record release start
+        run: echo "RELEASE_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # A tag that disagrees with the package version ships a release whose
+      # spans and metrics carry the wrong version: tag - every `version:` tag
+      # on LLM Obs traces and esp_migration.* series comes from pyproject.
+      - name: Tag matches the package version
+        id: tag_gate
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          project=$(uv run python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          echo "tag=$tag pyproject=$project"
+          if [ "$tag" != "$project" ]; then
+            echo "::error::tag v$tag does not match pyproject ($project)"
+            exit 1
+          fi
+
+      - name: Lint and test the tagged version
+        id: test_gate
+        run: |
+          uv sync
+          uv run ruff check .
+          uv run pytest
+
+      # The tag is out either way; a gate failing with it already pushed means
+      # a broken version standing as latest - that is this repo's change
+      # failure. The commit sha is passed explicitly because GITHUB_SHA on an
+      # annotated tag is the tag object, not the commit.
+      - name: Report release failure to Datadog DORA
+        if: failure() && (steps.tag_gate.outcome == 'failure' || steps.test_gate.outcome == 'failure')
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+        run: scripts/report_dora_failure.sh esp-migration-agent "$(git rev-parse HEAD)"
+
+      - name: Report release to Datadog DORA
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+        run: scripts/report_dora_deployment.sh esp-migration-agent "$RELEASE_STARTED_AT" "$(git rev-parse HEAD)"
+
+  # Announce the release in #releases (RC1-497): the PRs merged since the
+  # previous tag. The logic and the never-fails guarantee live in
+  # tpm-automation-platform's release-notify.yml; each secret is optional.
+  release-notify:
+    name: Announce release
+    needs: release
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: snacksnack/tpm-automation-platform/.github/workflows/release-notify.yml@main
+    with:
+      service: esp-migration-agent
+      workflow: release.yml
+    secrets:
+      SLACK_RELEASES_WEBHOOK_URL: ${{ secrets.SLACK_RELEASES_WEBHOOK_URL }}
+      JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+      JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      DD_API_KEY: ${{ secrets.DD_API_KEY }}
