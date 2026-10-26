@@ -36,3 +36,29 @@ jobs:
           DD_SERVICE: esp-migration-agent
           DD_ENV: ci
         run: uv run --with "ddtrace>=4.14,<5" pytest --ddtrace --cov
+
+  # RC1-546: the full fixture into a real Listmonk, reconciliation at 100%,
+  # second run converging to zero writes. Runs on every push, same as units -
+  # a migration engine whose e2e only runs on demand is not tested.
+  listmonk-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync
+        run: uv sync
+
+      - name: Start Listmonk
+        run: docker compose up -d --wait
+
+      - name: Bootstrap API user
+        run: uv run python -m executor.bootstrap >> "$GITHUB_ENV"
+
+      - name: Integration tests
+        run: uv run pytest -m integration -v

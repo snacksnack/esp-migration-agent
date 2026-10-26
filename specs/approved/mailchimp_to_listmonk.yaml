@@ -1,0 +1,207 @@
+spec_version: 1
+source: mailchimp
+target: listmonk
+generated_at: '2026-10-26T18:03:09.204188Z'
+status: approved
+field_mappings:
+- confidence: 0.98
+  rationale: EMAIL is the source primary key. Listmonk stores email as a native core
+    subscriber column.
+  status: edited
+  open_question: null
+  source_field: EMAIL
+  source_type: email
+  sample_values: []
+  target_field: email
+  transform: lowercase
+- confidence: 0.85
+  rationale: The listmonk template example references {{ .Subscriber.Attribs.first_name
+    }}, so first_name is the expected attrib key. FNAME has 195 empty values, which
+    makes the name fallback necessary.
+  status: edited
+  open_question: null
+  source_field: FNAME
+  source_type: text
+  sample_values: []
+  target_field: attribs.first_name
+  transform: none
+- confidence: 0.85
+  rationale: This is a plain text field with no format issues reported. Listmonk custom
+    fields live at attribs.<key>, and last_name mirrors the first_name convention.
+  status: edited
+  open_question: null
+  source_field: LNAME
+  source_type: text
+  sample_values: []
+  target_field: attribs.last_name
+  transform: none
+- confidence: 0.3
+  rationale: 'Formats are mixed: 4188 values are 5-digit ZIPs, 40 are non-numeric
+    (e.g. ''ask reid''), and 27 are truncated (e.g. ''1576'', ''1637''). The truncated
+    values are plausibly 5-digit ZIPs whose leading zero was stripped, but the payload
+    does not confirm this.'
+  status: edited
+  open_question: null
+  source_field: ZIP
+  source_type: text
+  sample_values:
+  - ask reid
+  - 00597
+  - '00636'
+  - '1576'
+  - '1637'
+  target_field: attribs.zip
+  transform: zero_pad_us_zip
+- confidence: 0.9
+  rationale: All sample values are consistent 2-letter state codes, and no mixed formats
+    were reported. The field maps directly to a custom attrib.
+  status: edited
+  open_question: null
+  source_field: STATE
+  source_type: text
+  sample_values:
+  - AK
+  - AL
+  - AR
+  target_field: attribs.state
+  transform: none
+- confidence: 0.25
+  rationale: 'Formats are mixed: 3745 values are ISO dates, 367 use another date format
+    such as ''01-07-26'', and 143 are free text such as ''last spring''. The ''01-07-26''
+    style is ambiguous between MM-DD-YY, DD-MM-YY, and YY-MM-DD.'
+  status: edited
+  open_question: null
+  source_field: LASTPURCH
+  source_type: text
+  sample_values:
+  - around the holidays
+  - last spring
+  - '2024-11-23'
+  - '2024-11-24'
+  - 01-07-26
+  - 01-12-26
+  target_field: attribs.last_purchase
+  transform: none
+- confidence: 0.3
+  rationale: MEMBER_RATING is a source-computed engagement score, and target_notes
+    state listmonk has no engagement or rating signal. The only value observed is
+    2, so a copied value would be static and carry no information.
+  status: edited
+  open_question: null
+  source_field: MEMBER_RATING
+  source_type: integer
+  sample_values:
+  - '2'
+  target_field: attribs.mc_member_rating
+  transform: none
+- confidence: 0.85
+  rationale: Values are already normalized to UTC, so the format is unambiguous. Opt-in
+    timestamps are useful consent evidence, and listmonk has no native column for
+    them.
+  status: edited
+  open_question: null
+  source_field: OPTIN_TIME
+  source_type: datetime
+  sample_values: []
+  target_field: attribs.optin_time
+  transform: none
+- confidence: 0.85
+  rationale: Values are already normalized to UTC. Preserving the confirmation timestamp
+    supports the confirmed subscription status proposed for subscribed contacts.
+  status: edited
+  open_question: null
+  source_field: CONFIRM_TIME
+  source_type: datetime
+  sample_values: []
+  target_field: attribs.confirm_time
+  transform: none
+merge_tag_mappings:
+- source_tag: ARCHIVE
+  target_tag: '{{ MessageURL }}'
+- source_tag: FNAME
+  target_tag: '{{ .Subscriber.Attribs.first_name }}'
+- source_tag: LASTPURCH
+  target_tag: '{{ .Subscriber.Attribs.last_purchase }}'
+- source_tag: LNAME
+  target_tag: '{{ .Subscriber.Attribs.last_name }}'
+- source_tag: STATE
+  target_tag: '{{ .Subscriber.Attribs.state }}'
+- source_tag: UNSUB
+  target_tag: '{{ UnsubscribeURL }}'
+- source_tag: ZIP
+  target_tag: '{{ .Subscriber.Attribs.zip }}'
+segment_mappings:
+- confidence: 0.4
+  rationale: The query shape is straightforward (attribs->>'<zip_key>' LIKE '112%'),
+    but the ZIP field is flagged and the attrib key is unresolved. If truncated ZIPs
+    are left unpadded, values like '1123x' could falsely match. The segment currently
+    has 4 members.
+  status: edited
+  open_question: null
+  source_segment: Brooklyn subscribers
+  source_logic: All contacts whose ZIP text starts with '112'.
+  target_query: subscribers.attribs->>'zip' LIKE '112%'
+- confidence: 0.2
+  rationale: Target_notes state listmonk has no engagement or rating signal to query.
+    The segment has 0 members, and MEMBER_RATING only shows the value 2.
+  status: edited
+  open_question: null
+  source_segment: Highly engaged (4-5 stars)
+  source_logic: All contacts whose Mailchimp member rating is greater than 3 (4 or
+    5 stars).
+  target_query: (subscribers.attribs->>'mc_member_rating')::int > 3
+- confidence: 0.3
+  rationale: The rule depends on LASTPURCH, which is flagged for mixed formats. Values
+    like '01-07-26' do not contain the literal '2026' today but might after normalization,
+    so the current 1709-member count would change.
+  status: edited
+  open_question: null
+  source_segment: VIP customers
+  source_logic: All contacts whose LASTPURCH text contains '2026'.
+  target_query: subscribers.attribs->>'last_purchase' LIKE '%2026%'
+- confidence: 0.25
+  rationale: 'This segment overlaps ''VIP customers'': it has 1712 members versus
+    1709 and differs only by an OR on the Brooklyn ZIP rule (4 members). It also depends
+    on both flagged fields, ZIP and LASTPURCH.'
+  status: edited
+  open_question: null
+  source_segment: VIP (legacy)
+  source_logic: Any contact whose LASTPURCH text contains '2026' OR whose ZIP starts
+    with '112'.
+  target_query: subscribers.attribs->>'last_purchase' LIKE '%2026%' OR subscribers.attribs->>'zip'
+    LIKE '112%'
+consent_mappings:
+- confidence: 0.85
+  rationale: The 3756 subscribed contacts have opted in to marketing, and the source
+    captures OPTIN_TIME and CONFIRM_TIME. Importing them as confirmed avoids re-triggering
+    double opt-in emails.
+  status: edited
+  open_question: null
+  source_status: subscribed
+  target_status: enabled/confirmed
+- confidence: 0.5
+  rationale: There are 411 unsubscribed contacts, exactly matching suppression_count
+    (411). Listmonk offers either a global blocklisted subscriber status or a per-list
+    unsubscribed status, and the payload does not say which scope the reviewer intends.
+  status: edited
+  open_question: null
+  source_status: unsubscribed
+  target_status: blocklisted
+- confidence: 0.3
+  rationale: 'The 88 nonsubscribed contacts never opted in to marketing (Mailchimp
+    transactional contacts). Listmonk has no faithful equivalent: ''unconfirmed''
+    may trigger opt-in emails, and ''confirmed'' would imply consent that does not
+    exist.'
+  status: edited
+  open_question: null
+  source_status: nonsubscribed
+  target_status: enabled/unconfirmed
+suppressions:
+  order: before_subscribers
+  source_statuses:
+  - unsubscribed
+  - cleaned
+approval:
+  approved_by: Reid Collins
+  approved_at: '2026-10-26T19:00:00Z'
+  content_sha256: af61b3ee519f0b2d69c2d2f6d374929d20ad59ead9f47c75b6c4eb80762925c5
