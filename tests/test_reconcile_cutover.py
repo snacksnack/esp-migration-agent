@@ -10,12 +10,8 @@ import pytest
 from executor.cutover import render_cutover_plan
 from executor.engine import execute
 from executor.plan import build_plan
-from executor.reconcile import (
-    QueryNotEvaluatable,
-    evaluate_query,
-    reconcile,
-    render_markdown,
-)
+from executor.queries import QueryNotEvaluatable, evaluate_query
+from executor.reconcile import reconcile, render_markdown
 from ingest.mailchimp import load_bundle
 from mapping.gate import load_approved
 from tests.fake_target import FakeTarget

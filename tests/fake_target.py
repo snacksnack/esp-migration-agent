@@ -6,7 +6,7 @@ evaluator reconciliation uses."""
 from __future__ import annotations
 
 from executor.plan import DesiredSubscriber, PlannedCampaign
-from executor.reconcile import evaluate_query
+from executor.queries import evaluate_query
 from executor.target import TargetSubscriber
 
 
