@@ -24,6 +24,7 @@ from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from mapping.gate import GateError, approve, load_spec, mapping_label
 from mapping.proposer import ProposalError, propose
 from specs.model import MappingSpec, MappingStatus
+from telemetry import count, enable_llmobs, stage, workflow
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
@@ -60,8 +61,10 @@ def render_status(spec: MappingSpec) -> str:
 
 
 def cmd_propose(args: argparse.Namespace) -> int:
-    bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
-    spec = propose(bundle, build_inventory(bundle), target=args.target)
+    enable_llmobs()
+    with stage("propose"), workflow("mapping.propose"):
+        bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
+        spec = propose(bundle, build_inventory(bundle), target=args.target)
     out: Path = args.out or DRAFTS_DIR / f"{spec.source}_to_{spec.target}.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(spec.to_yaml())
@@ -76,7 +79,12 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_approve(args: argparse.Namespace) -> int:
-    approved = approve(load_spec(args.spec), approved_by=args.by)
+    try:
+        approved = approve(load_spec(args.spec), approved_by=args.by)
+    except GateError:
+        count("gate_approval", tags={"outcome": "refused"})
+        raise
+    count("gate_approval", tags={"outcome": "approved"})
     out: Path = args.out or args.spec.with_name(
         args.spec.name.replace(".yaml", ".approved.yaml")
     )

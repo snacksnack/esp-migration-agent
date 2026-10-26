@@ -23,6 +23,7 @@ from executor.plan import PlanError, build_plan
 from executor.target import TargetError
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from mapping.gate import GateError, load_approved
+from telemetry import count, stage
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
@@ -47,22 +48,33 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    mode = "execute" if args.execute else "dry_run"
     try:
-        spec = load_approved(args.spec)
-        bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
-        plan = build_plan(bundle, spec)
-        client = client_for_target(args.target, need_writes=args.execute)
+        with stage("execute", mode=mode, target=args.target):
+            spec = load_approved(args.spec)
+            bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
+            plan = build_plan(bundle, spec)
+            client = client_for_target(args.target, need_writes=args.execute)
 
-        list_id = client.ensure_list(plan.list_name)
-        diff = compute_diff(
-            plan, client.current_subscribers(list_id), client.current_campaigns()
-        )
-        print(render_diff(diff))
-        if not args.execute:
-            print("\ndry run only; pass --execute to write")
-            return 0
+            list_id = client.ensure_list(plan.list_name)
+            diff = compute_diff(
+                plan, client.current_subscribers(list_id), client.current_campaigns()
+            )
+            print(render_diff(diff))
+            if not args.execute:
+                print("\ndry run only; pass --execute to write")
+                return 0
 
-        summary = execute(plan, client)
+            try:
+                summary = execute(plan, client)
+            except TargetError:
+                count("executor_write_errors", tags={"target": args.target})
+                raise
+            count(
+                "executor_writes",
+                value=sum(summary.written.values()),
+                tags={"target": args.target},
+            )
         writes = ", ".join(f"{k}: {v:,}" for k, v in sorted(summary.written.items()))
         print(
             f"\nexecuted into list {summary.list_id}: {writes or 'nothing'} "

@@ -28,6 +28,7 @@ from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from ingest.models import MailchimpBundle
 from mapping.gate import load_spec
 from mapping.risks import spec_risks
+from telemetry import enable_llmobs, stage, workflow
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
@@ -198,15 +199,18 @@ def main() -> int:
     args = parser.parse_args()
 
     as_of = datetime.strptime(args.as_of, "%Y-%m-%d").replace(tzinfo=UTC)
-    bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
-    report = build_report(bundle, as_of=as_of, target=args.target)
-    if args.spec:
-        # Flagged-mapping open questions join the same severity-ranked log.
-        # Merged after build_report so the effort model stays driven by
-        # discovery counts alone.
-        report.risks = sort_risks([*report.risks, *spec_risks(load_spec(args.spec))])
-    if args.narrate:
-        report.narration = narrate(report.profile, report.inventory, report.risks)
+    with stage("discovery"):
+        bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
+        report = build_report(bundle, as_of=as_of, target=args.target)
+        if args.spec:
+            # Flagged-mapping open questions join the same severity-ranked log.
+            # Merged after build_report so the effort model stays driven by
+            # discovery counts alone.
+            report.risks = sort_risks([*report.risks, *spec_risks(load_spec(args.spec))])
+        if args.narrate:
+            enable_llmobs()
+            with workflow("discovery.report"):
+                report.narration = narrate(report.profile, report.inventory, report.risks)
     markdown = render_markdown(report)
     if args.out:
         args.out.write_text(markdown)

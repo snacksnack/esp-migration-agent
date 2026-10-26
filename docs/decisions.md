@@ -3,6 +3,41 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0008: Observability is decoration; a tag is the release (2026-10-26)
+
+**Decision.** Phase 5 (RC1-548) adds `telemetry/`: Datadog LLM Obs tracing for
+the two model calls and `esp_migration.*` run metrics for everything the
+service dashboard, monitors, and SLOs need. Three commitments:
+
+- **Decoration, never load-bearing.** `ddtrace` lives in an optional `obs`
+  dependency group (`uv sync --group obs` on a machine that should trace);
+  with the group absent or `DD_API_KEY` unset, every telemetry call is a
+  no-op and the pipeline behaves identically. The suite passes with neither.
+  A failed metric POST prints to stderr and returns False - never raises
+  (telemetry must not fail a migration) and never swallows silently (the v2
+  series API answers a malformed payload with a 400 that would otherwise be
+  indistinguishable from no traffic).
+- **One ml_app, versioned root spans.** LLM Obs traces land under ml_app
+  `esp-migration-agent` (one ml_app per agent: the LLM Obs app list is the
+  fleet inventory). Pipeline stages are workflow spans (`discovery.report`,
+  `mapping.propose`); the intake indexes a root span's tags only when the
+  payload carries `version:` (RC1-407), so `enable_llmobs()` defaults
+  DD_VERSION to the pyproject version. Cost per migration is derived from
+  these traces. Eval runs pass `service="evals"` so the two populations
+  stay separable.
+- **Metrics name the ticket's questions.** `pipeline_run` (stage, outcome),
+  `gate_approval` (approved/refused), `executor_writes` / `executor_write_
+  errors` (target), `reconcile_result` (pass/fail) - counts, tagged
+  service/env/version. Monitors, SLOs, and the dashboard are defined as code
+  in tpm-automation-platform/datadog/ under the daily drift CI, never in the
+  Datadog UI.
+
+**Release = tag.** Nothing here deploys to infrastructure, so `release.yml`
+adopts the agent-evals pattern (RC1-459): a pushed `v*` tag is the release,
+gated on tag==pyproject version plus lint+tests, reported to Datadog DORA via
+the shared scripts, announced through the estate's release-notify flow. That
+is the standard Actions -> Datadog deploy path the ticket requires.
+
 ## ADR-0007: The spec is canonical; adapters own every platform difference (2026-10-26)
 
 **Decision.** Phase 4 adds `executor/brevo.py` behind the same TargetClient
