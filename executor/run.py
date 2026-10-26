@@ -17,27 +17,15 @@ import argparse
 import sys
 from pathlib import Path
 
+from executor.clients import TARGETS, client_for_target
 from executor.engine import compute_diff, execute, render_diff
-from executor.listmonk import ListmonkSettings, client_from_settings
 from executor.plan import PlanError, build_plan
-from executor.target import OfflineTarget, TargetClient, TargetError
+from executor.target import TargetError
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from mapping.gate import GateError, load_approved
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
-
-
-def pick_client(settings: ListmonkSettings, need_writes: bool) -> TargetClient:
-    if settings.configured:
-        return client_from_settings(settings)
-    if need_writes:
-        raise TargetError(
-            "--execute needs a configured target (ESP_LISTMONK_URL, "
-            "ESP_LISTMONK_USERNAME, ESP_LISTMONK_PASSWORD)"
-        )
-    print("note: no target configured; diffing against an assumed-empty target\n")
-    return OfflineTarget()
 
 
 def main() -> int:
@@ -51,13 +39,19 @@ def main() -> int:
         action="store_true",
         help="write to the target (default is dry-run: show the diff and stop)",
     )
+    parser.add_argument(
+        "--target",
+        choices=TARGETS,
+        default="listmonk",
+        help="which adapter writes; the plan and engine are target-agnostic",
+    )
     args = parser.parse_args()
 
     try:
         spec = load_approved(args.spec)
         bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
         plan = build_plan(bundle, spec)
-        client = pick_client(ListmonkSettings(), need_writes=args.execute)
+        client = client_for_target(args.target, need_writes=args.execute)
 
         list_id = client.ensure_list(plan.list_name)
         diff = compute_diff(

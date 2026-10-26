@@ -46,9 +46,11 @@ The schema cannot even represent a spec that violates it
   the rendered report; the LLM only narrates computed aggregates
 - `mapping/` - the LLM mapping proposer and the human review gate (ADR-0005);
   `mapping.gate.load_approved` is the only door downstream stages read through
-- `executor/` - deterministic executor (ADR-0006): plan builder with the
-  suppression invariant, Listmonk adapter, dry-run diff, idempotent
-  execution, reconciliation report, cutover plan
+- `executor/` - deterministic executor (ADR-0006/0007): plan builder with
+  the suppression invariant, Listmonk + Brevo adapters behind one protocol
+  (`--target`), dry-run diff, idempotent execution, reconciliation report,
+  cutover plan
+- `scripts/demo.sh` - the scripted end-to-end demo (runbook: docs/demo.md)
 - `seeding/` - deterministic subscriber generator + Mailchimp seeder, and the
   `ground_truth.json` the discovery stage is verified against
 - `fixtures/` - the synthetic export bundle (see fixtures/README.md)

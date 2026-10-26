@@ -28,8 +28,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from executor.listmonk import ListmonkSettings, client_from_settings
+from executor.clients import TARGETS, client_for_target
 from executor.plan import MERGE_TAG_RE, DesiredSubscriber, MigrationPlan, build_plan
+from executor.queries import QueryNotEvaluatable, evaluate_query
 from executor.target import TargetClient
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from ingest.models import MailchimpBundle
@@ -40,46 +41,6 @@ FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
 SAMPLE_TARGET = 50
 
-# The tiny slice of target-query SQL the approved spec uses, re-evaluated in
-# Python for segment parity. Anything it cannot parse is reported as
-# "not evaluated", never guessed.
-_LIKE_RE = re.compile(r"^subscribers\.attribs->>'(?P<key>\w+)' LIKE '(?P<pat>[^']*)'$")
-_INT_CMP_RE = re.compile(
-    r"^\(subscribers\.attribs->>'(?P<key>\w+)'\)::int (?P<op>>=|<=|>|<|=) (?P<n>-?\d+)$"
-)
-
-
-class QueryNotEvaluatable(RuntimeError):
-    pass
-
-
-def _like_to_predicate(pattern: str):
-    regex = re.compile("^" + ".*".join(re.escape(p) for p in pattern.split("%")) + "$")
-    return lambda value: bool(regex.match(value))
-
-
-def evaluate_query(query: str, attribs: dict[str, str | int]) -> bool:
-    """Evaluate one segment query clause-by-clause (top-level OR only)."""
-    for clause in query.split(" OR "):
-        clause = clause.strip()
-        if m := _LIKE_RE.match(clause):
-            value = str(attribs.get(m["key"], ""))
-            if _like_to_predicate(m["pat"])(value):
-                return True
-        elif m := _INT_CMP_RE.match(clause):
-            raw = attribs.get(m["key"])
-            if raw is None or str(raw).lstrip("-") == "" or not str(raw).lstrip("-").isdigit():
-                continue
-            value, n = int(raw), int(m["n"])
-            ops = {
-                ">": value > n, ">=": value >= n, "<": value < n,
-                "<=": value <= n, "=": value == n,
-            }
-            if ops[m["op"]]:
-                return True
-        else:
-            raise QueryNotEvaluatable(clause)
-    return False
 
 
 def subscriber_checksum(email: str, name: str, status: str, subscription: str,
@@ -370,12 +331,13 @@ def main() -> int:
     parser.add_argument("--audience-dir", type=Path, default=FIXTURE_AUDIENCE)
     parser.add_argument("--supplement-dir", type=Path, default=FIXTURE_SUPPLEMENT)
     parser.add_argument("--account-tz", default=DEFAULT_ACCOUNT_TZ)
+    parser.add_argument("--target", choices=TARGETS, default="listmonk")
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
     spec = load_approved(args.spec)
     bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
-    client = client_from_settings(ListmonkSettings())
+    client = client_for_target(args.target, need_writes=True)
     report = reconcile(bundle, spec, client)
     markdown = render_markdown(report)
     if args.out:
