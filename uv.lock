@@ -11,7 +11,7 @@ resolution-markers = [
 [[package]]
 name = "agent-evals"
 version = "0.6.3"
-source = { git = "https://github.com/snacksnack/agent-evals?rev=141efa4c93c565ed5fd6ee933bcc89ab3b8c7fb9#141efa4c93c565ed5fd6ee933bcc89ab3b8c7fb9" }
+source = { git = "https://github.com/snacksnack/agent-evals?rev=v0.6.3#9e94a7799e077c3c5d6a1cb5cf574889ddc3618d" }
 dependencies = [
     { name = "anthropic" },
     { name = "pydantic" },
@@ -315,7 +315,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.6" },
 ]
-evals = [{ name = "agent-evals", extras = ["sql", "llmobs"], git = "https://github.com/snacksnack/agent-evals?rev=141efa4c93c565ed5fd6ee933bcc89ab3b8c7fb9" }]
+evals = [{ name = "agent-evals", extras = ["sql", "llmobs"], git = "https://github.com/snacksnack/agent-evals?rev=v0.6.3" }]
 obs = [{ name = "ddtrace", specifier = ">=4.14,<5" }]
 
 [[package]]

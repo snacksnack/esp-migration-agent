@@ -29,9 +29,7 @@ obs = [
 # the measurement did. v0.6.3 prices claude-opus-5-5 - the model both of this
 # repo's LLM calls use - so run records carry real cost.
 evals = [
-    # TEMPORARY sha pin = the v0.6.3 content; flip to @v0.6.3 once the tag
-    # exists (agent-evals PR #44).
-    "agent-evals[sql,llmobs] @ git+https://github.com/snacksnack/agent-evals@141efa4c93c565ed5fd6ee933bcc89ab3b8c7fb9",
+    "agent-evals[sql,llmobs] @ git+https://github.com/snacksnack/agent-evals@v0.6.3",
 ]
 
 [tool.uv]
