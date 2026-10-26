@@ -56,8 +56,10 @@ jobs:
           python-version: "3.12"
           enable-cache: true
 
+      # --all-groups: pytest collects every test module before -m deselects,
+      # so the scorer tests' agent_evals import must resolve here too.
       - name: Sync
-        run: uv sync
+        run: uv sync --all-groups
 
       - name: Start Listmonk
         run: docker compose up -d --wait
