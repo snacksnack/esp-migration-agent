@@ -218,7 +218,11 @@ def build_plan(bundle: MailchimpBundle, spec: MappingSpec) -> MigrationPlan:
         attribs: dict[str, str | int] = {}
         for m in field_mappings:
             raw = SOURCE_FIELD_READERS[m.source_field](member)
-            if raw is None:
+            # An empty source value is NO value: the key is omitted, on every
+            # target. (Brevo drops empty-string attributes on write, so
+            # writing "" would never converge; Listmonk would store it, and
+            # the two targets would disagree about the same spec.)
+            if raw is None or raw == "":
                 continue
             value = TRANSFORMS[m.transform](raw) if isinstance(raw, str) else raw
             key = _attrib_key(m.target_field, m.source_field)
@@ -248,7 +252,12 @@ def build_plan(bundle: MailchimpBundle, spec: MappingSpec) -> MigrationPlan:
         PlannedCampaign(
             name=c.title,
             subject=c.subject_line,
-            body=translate_merge_tags(c.html, tag_map, context=f"campaign {c.title!r}"),
+            # Edge whitespace is stripped: targets normalize it on store
+            # (Brevo drops a trailing newline), and a body that differs only
+            # there must still converge.
+            body=translate_merge_tags(
+                c.html, tag_map, context=f"campaign {c.title!r}"
+            ).strip(),
         )
         for c in bundle.campaigns
     ]
