@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      # --ddtrace reports test-level results to Test Optimization, agentless;
+      # --cov adds lines_pct. Coverage is a signal, not a gate. Not a test
+      # credential: the suite passes identically with no key.
+      - name: Tests
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          DD_CIVISIBILITY_AGENTLESS_ENABLED: "true"
+          DD_SITE: datadoghq.com
+          DD_SERVICE: esp-migration-agent
+          DD_ENV: ci
+        run: uv run --with "ddtrace>=4.14,<5" pytest --ddtrace --cov
