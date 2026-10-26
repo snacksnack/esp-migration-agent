@@ -30,8 +30,10 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 try:  # documented optional-dep exception: the `obs` group may be absent
+    from ddtrace import config as _dd_config
     from ddtrace.llmobs import LLMObs
 except ImportError:  # pragma: no cover - exercised only without the group
+    _dd_config = None
     LLMObs = None
 
 ML_APP = "esp-migration-agent"
@@ -63,7 +65,12 @@ def enable_llmobs(*, service: str | None = None) -> bool:
         return True
     if LLMObs is None or not os.environ.get("DD_API_KEY"):
         return False
+    # ddtrace read DD_VERSION at import time, before this ran; set the config
+    # directly or the version tag goes out empty (measured: the first traced
+    # run indexed with version:"", exactly the RC1-407 drop this guards).
     os.environ.setdefault("DD_VERSION", package_version())
+    if not _dd_config.version:
+        _dd_config.version = os.environ["DD_VERSION"]
     _restrict_patching_to_anthropic()
     try:
         LLMObs.enable(
