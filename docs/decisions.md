@@ -3,6 +3,43 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0007: The spec is canonical; adapters own every platform difference (2026-10-26)
+
+**Decision.** Phase 4 adds `executor/brevo.py` behind the same TargetClient
+protocol, selected by `--target` (`executor/clients.py`). The executor core -
+plan, engine, reconciliation - does not change; the SAME approved spec drives
+both targets. What the spec says (attrib paths, canonical consent labels, the
+tiny query dialect, the plan's template syntax) is the canonical vocabulary;
+rendering it into a platform is adapter work, reversed on read so the engine
+always compares in one vocabulary:
+
+- **Attributes:** `first_name` <-> Brevo's global `FIRST_NAME`; Brevo number
+  attributes come back as floats and are re-normalized to the ints the plan
+  wrote (padded zips stay text).
+- **Merge tags:** a bijection (`TAG_TO_BREVO`) applied on write and inverted
+  on read, so convergence checks and the reconciliation render comparison
+  work unchanged. A canonical tag without a Brevo translation refuses loudly.
+- **Consent:** Brevo has one control (global `emailBlacklisted`), no per-list
+  subscription states. The canonical label persists in an `ESP_CONSENT`
+  attribute; the flag lands per `BREVO_BLACKLISTED`. Unconfirmed contacts
+  land NOT MAILABLE (retained, labeled, blacklisted until a re-permission
+  pass): Brevo cannot represent "needs confirmation", and erring mailable
+  would manufacture consent. On read the stored label is trusted only while
+  the actual flag matches where that label lands; a contact un-blacklisted
+  behind the executor's back reports its ACTUAL mailability, so suppression
+  integrity fails loudly rather than trusting a stale label.
+- **Segments:** Brevo has no server-side query API; `count_query` evaluates
+  the spec's query dialect client-side (`executor/queries.py`, shared with
+  reconciliation and the test fake).
+
+**Demo** (`scripts/demo.sh`, runbook `docs/demo.md`): the full arc - export,
+discovery, proposal with open questions, human review, approve, dry-run,
+execute, reconciliation, cutover plan - against either target. `DEMO_FAST=1`
+migrates a deterministic 600-subscriber sample so the arc fits a two-minute
+clip; drafts only, nothing sends, on any target. The Brevo integration test
+is env-gated and NOT in CI: the live account is a demo asset with real rate
+limits.
+
 ## ADR-0006: The executor plans everything before writing anything (2026-10-26)
 
 **Decision.** Phase 3 lives in `executor/`: a pure plan builder (`plan.py`),
