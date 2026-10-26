@@ -54,6 +54,12 @@ proposes, deterministic Python validates, a human approves.
   never raises. ml_app `esp-migration-agent`; DD_VERSION defaults to the
   pyproject version so root-span tags index (RC1-407). A pushed v* tag is the
   release (`release.yml`): gates, then DORA deployment/failure events.
+- `evals/` - the agent-evals subject `esp-mapping-quality` (RC1-548): frozen
+  proposer payloads in `evals/cases/`, ground truth in `expectations.py`
+  (must_flag seeded ambiguities / must_propose with target predicates /
+  advisory judgment calls). `uv run --group evals python -m evals` is BILLED
+  and records to the shared store; the scorer itself is tested free in
+  tests/test_evals_subject.py. Publish the trend page after a live run.
 - `seeding/generator.py` - pure, seeded subscriber generator returning records
   plus expected aggregates (the ground truth for RC1-544).
 - `seeding/mailchimp_seeder.py` - API uploader; needs `ESP_MAILCHIMP_API_KEY`.

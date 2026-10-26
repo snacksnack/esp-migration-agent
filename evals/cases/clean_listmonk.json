@@ -1,0 +1,119 @@
+{
+  "source": "mailchimp",
+  "target": "listmonk",
+  "target_notes": "Listmonk stores subscribers with email, name, and a free-form JSONB attribs object (custom fields live at attribs.<key>). Segments are SQL queries over subscribers (e.g. subscribers.attribs->>'zip' LIKE '112%'); there is no engagement or rating signal to query. Subscriber status is enabled or blocklisted, plus a per-list subscription status of unconfirmed, confirmed, or unsubscribed. Templates use Go template syntax: {{ .Subscriber.Attribs.first_name }}, {{ .Subscriber.Email }}, {{ UnsubscribeURL }}, {{ MessageURL }} (hosted copy of the message).",
+  "fields": [
+    {
+      "source_field": "EMAIL",
+      "source_type": "email",
+      "notes": "primary key"
+    },
+    {
+      "source_field": "FNAME",
+      "source_type": "text",
+      "empty_count": 195
+    },
+    {
+      "source_field": "LNAME",
+      "source_type": "text"
+    },
+    {
+      "source_field": "ZIP",
+      "source_type": "text",
+      "observed_formats": {
+        "zip_5_digit": 4255
+      },
+      "sample_values": [
+        "00597",
+        "00636",
+        "11201",
+        "90210"
+      ]
+    },
+    {
+      "source_field": "STATE",
+      "source_type": "text",
+      "sample_values": [
+        "AK",
+        "AL",
+        "AR"
+      ]
+    },
+    {
+      "source_field": "LASTPURCH",
+      "source_type": "text",
+      "observed_formats": {
+        "iso_date": 4255
+      },
+      "sample_values": [
+        "2024-11-23",
+        "2025-06-02",
+        "2026-01-07"
+      ]
+    },
+    {
+      "source_field": "MEMBER_RATING",
+      "source_type": "integer",
+      "notes": "source-computed engagement score",
+      "distinct_values_observed": [
+        2
+      ]
+    },
+    {
+      "source_field": "OPTIN_TIME",
+      "source_type": "datetime",
+      "notes": "parsed to UTC at ingest"
+    },
+    {
+      "source_field": "CONFIRM_TIME",
+      "source_type": "datetime",
+      "notes": "parsed to UTC at ingest"
+    }
+  ],
+  "segments": [
+    {
+      "name": "Brooklyn subscribers",
+      "match": "all",
+      "conditions": [
+        {
+          "condition_type": "TextMerge",
+          "field": "ZIP",
+          "op": "starts",
+          "value": "112"
+        }
+      ],
+      "member_count": 4
+    },
+    {
+      "name": "VIP customers",
+      "match": "all",
+      "conditions": [
+        {
+          "condition_type": "TextMerge",
+          "field": "LASTPURCH",
+          "op": "contains",
+          "value": "2026"
+        }
+      ],
+      "member_count": 1709
+    }
+  ],
+  "merge_tags_in_use": [
+    "ARCHIVE",
+    "FNAME",
+    "LASTPURCH",
+    "LNAME",
+    "STATE",
+    "UNSUB",
+    "ZIP"
+  ],
+  "consent_buckets": {
+    "note": "Counts from the audience export. Every bucket listed here must receive a consent mapping.",
+    "observed": {
+      "subscribed": 3756,
+      "unsubscribed": 411,
+      "nonsubscribed": 88
+    }
+  },
+  "suppression_count": 411
+}
