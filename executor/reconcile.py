@@ -36,6 +36,7 @@ from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from ingest.models import MailchimpBundle
 from mapping.gate import load_approved
 from specs.model import MappingSpec
+from telemetry import count, stage
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
@@ -336,10 +337,15 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    spec = load_approved(args.spec)
-    bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
-    client = client_for_target(args.target, need_writes=True)
-    report = reconcile(bundle, spec, client)
+    with stage("reconcile", target=args.target):
+        spec = load_approved(args.spec)
+        bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
+        client = client_for_target(args.target, need_writes=True)
+        report = reconcile(bundle, spec, client)
+    count(
+        "reconcile_result",
+        tags={"outcome": "pass" if report.passed else "fail", "target": args.target},
+    )
     markdown = render_markdown(report)
     if args.out:
         args.out.write_text(markdown)
