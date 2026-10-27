@@ -3,6 +3,37 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0015: Retries follow what a failure proves about the target (2026-10-27)
+
+**Decision.** RC1-570 (external review finding, GPT-6 Astra #8): the adapters
+raised `TargetError` on the first HTTP hiccup and the only recovery was the
+idempotent re-run - correct, but needlessly loud for transient faults and
+unsafe to improve with a blanket retry, because replaying a write whose reply
+was lost is how duplicates are made. `executor/retries.py` now classifies
+every failure by what it proves about the target's state, and both adapters
+route all calls through it:
+
+- **Safe (provably unprocessed):** 429 and 503, and connect-phase errors
+  where the request never left the process. Bounded retries (4 attempts,
+  0.5/1/2s backoff) for any method; `Retry-After` honored, capped at 30s so
+  a hostile header cannot stall a run.
+- **Ambiguous (the write may have landed):** read timeouts, dropped sockets,
+  and gateway answers (502, 504). Idempotent calls replay (GET, PUT, and
+  Brevo's `updateEnabled` contact upsert, declared `replay_safe`). Every
+  other write verifies with a read-back before re-sending: Listmonk creates
+  look the subscriber/list/campaign up by its natural key and, when found,
+  the recovered row stands in for the lost response (follow-up writes use
+  the recovered id). A non-idempotent write with no read-back refuses to
+  replay and says so.
+- **Fatal (understood and refused):** 400/401/403/404/500 and the rest raise
+  immediately - expired credentials mid-run must stop the run, not burn the
+  retry budget. The recovery from any partial run stays the idempotent
+  re-run, which converges to zero writes (tests/test_interrupted_run.py).
+
+The failure matrix is unit-level by design: `httpx.MockTransport` per adapter
+(tests/test_failure_matrix_*.py) with injected transport and sleep, no
+network, no real backoff waits. The e2e stays the happy path.
+
 ## ADR-0014 amendment (RC1-569, 2026-10-27): the parse timezone is an input
 too. The fingerprint hashes the export FILES, but OPTIN_TIME/CONFIRM_TIME
 are localized with --account-tz before converting to UTC, so the same files
