@@ -171,6 +171,23 @@ async function unwrap<T>(resp: Response): Promise<T> {
   return resp.json() as Promise<T>
 }
 
+export interface Me {
+  authenticated: boolean
+  auth_enabled: boolean
+}
+
+export function getMe(): Promise<Me> {
+  return fetch('/api/me').then((r) => unwrap<Me>(r))
+}
+
+export function login(password: string): Promise<{ ok: boolean }> {
+  return fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  }).then((r) => unwrap<{ ok: boolean }>(r))
+}
+
 export function getSpec(): Promise<SpecResponse> {
   return fetch('/api/spec').then((r) => unwrap<SpecResponse>(r))
 }

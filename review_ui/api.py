@@ -20,7 +20,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
@@ -29,6 +30,8 @@ from discovery.risks import sort_risks
 from ingest.mailchimp import load_bundle
 from mapping.gate import GateError, approve, load_spec
 from mapping.risks import spec_risks
+from review_ui import auth
+from review_ui.config import ReviewUiSettings
 from specs.model import MappingSpec, MappingStatus
 from telemetry import count
 
@@ -56,6 +59,18 @@ class ApproveRequest(BaseModel):
     approved_by: str = Field(min_length=1)
 
 
+class LoginBody(BaseModel):
+    # Module-level, not a closure local: `from __future__ import annotations`
+    # stringifies hints, and FastAPI resolves them from module globals - a
+    # local class silently degrades to a query parameter (school-search lesson).
+    password: str
+
+
+# Reachable without the session cookie: login itself, and the auth probe the
+# SPA uses to decide whether to show the login screen.
+OPEN_API_PATHS = frozenset({"/api/login", "/api/me"})
+
+
 def _load(spec_path: Path) -> MappingSpec:
     try:
         return load_spec(spec_path)
@@ -72,9 +87,49 @@ def create_app(
     target: str,
     as_of: datetime,
     approved_dir: Path = Path("specs/approved"),
+    settings: ReviewUiSettings | None = None,
 ) -> FastAPI:
+    settings = settings or ReviewUiSettings()
     app = FastAPI(title="ESP migration review gate", docs_url=None, redoc_url=None)
     report_cache: list[DiscoveryReport] = []  # built once; the bundle never changes mid-session
+
+    @app.middleware("http")
+    async def gate(request: Request, call_next):
+        path = request.url.path
+        if (
+            settings.auth_enabled
+            and path.startswith("/api")
+            and path not in OPEN_API_PATHS
+            and not auth.token_valid(settings, request.cookies.get(auth.COOKIE_NAME))
+        ):
+            return JSONResponse({"detail": "login required"}, status_code=401)
+        return await call_next(request)
+
+    @app.get("/healthz")
+    def healthz() -> dict:
+        return {"status": "ok", "app": "esp-review-gate"}
+
+    @app.post("/api/login")
+    def login(body: LoginBody) -> Response:
+        if not settings.auth_enabled or not auth.password_matches(settings, body.password):
+            return JSONResponse({"detail": "wrong password"}, status_code=401)
+        response = JSONResponse({"ok": True})
+        response.set_cookie(
+            auth.COOKIE_NAME,
+            auth.make_token(settings),
+            max_age=settings.review_session_days * 86400,
+            httponly=True,
+            samesite="lax",
+            secure=settings.environment == "production",
+        )
+        return response
+
+    @app.get("/api/me")
+    def me(request: Request) -> dict:
+        ok = not settings.auth_enabled or auth.token_valid(
+            settings, request.cookies.get(auth.COOKIE_NAME)
+        )
+        return {"authenticated": ok, "auth_enabled": settings.auth_enabled}
 
     @app.get("/api/spec")
     def get_spec() -> dict:

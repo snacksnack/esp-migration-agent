@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from mapping.gate import load_approved, load_spec
 from review_ui.api import create_app
+from review_ui.config import ReviewUiSettings
 from specs.model import MappingStatus
 
 DRAFT = Path("specs/drafts/mailchimp_to_listmonk.yaml")
@@ -42,6 +43,9 @@ def client(spec_path: Path, tmp_path: Path) -> TestClient:
         target="listmonk",
         as_of=AS_OF,
         approved_dir=tmp_path / "approved",
+        # Gate off, pinned: tests never read .env (repo convention), and this
+        # file tests the API semantics, not the RC1-561 password gate.
+        settings=ReviewUiSettings(review_password=None, _env_file=None),
     )
     return TestClient(app)
 

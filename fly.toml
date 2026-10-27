@@ -1,0 +1,33 @@
+# Fly.io hosted review-gate demo (RC1-561), esp.hihelloreid.com.
+#   fly apps create esp-migration-demo
+#   fly secrets set ESP_REVIEW_PASSWORD=... ESP_REVIEW_SESSION_SECRET=...
+#   fly deploy                      # or let fly-deploy.yml do it on CI green
+#   fly certs add esp.hihelloreid.com   # then add the CNAME it prints
+# No volume on purpose: the demo's state is the baked-in fixture spec, and a
+# machine restart resets it to pristine (ADR-0011).
+app = "esp-migration-demo"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ESP_ENVIRONMENT = "production"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
