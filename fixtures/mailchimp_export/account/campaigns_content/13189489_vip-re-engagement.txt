@@ -1,0 +1,9 @@
+** A deal just for you, *|FNAME|* *|LNAME|*
+------------------------------------------------------------
+
+Shoppers near *|ZIP|* get free delivery this week.
+
+Shop the sale (https://shop.example.test/deals)
+------------------------------------------------------------
+
+Unsubscribe (*|UNSUB|*)
