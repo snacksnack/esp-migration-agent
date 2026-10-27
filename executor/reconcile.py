@@ -72,8 +72,15 @@ class SegmentCheck(BaseModel):
     source_count: int
 
     @property
+    def verified(self) -> bool:
+        return self.plan_count is not None
+
+    @property
     def ok(self) -> bool:
-        return self.plan_count is None or self.target_count == self.plan_count
+        # UNVERIFIED is not a pass: a query Python cannot evaluate failed its
+        # check until the query (or the spec) is fixed - a check that did not
+        # run must never read as parity (RC1-565).
+        return self.verified and self.target_count == self.plan_count
 
 
 class SuppressionIntegrity(BaseModel):
@@ -92,6 +99,21 @@ class ChecksumCheck(BaseModel):
     mismatches: list[str]
 
 
+class MembershipCheck(BaseModel):
+    """Full bidirectional email-set comparison. Aggregate counts can mask
+    offsetting errors - a wrong address present plus a right one missing nets
+    to a matching count - so every address is compared, both ways (RC1-565)."""
+
+    expected: int
+    actual: int
+    missing: list[str]  # planned, absent from the target list
+    unexpected: list[str]  # in the target list, not in the plan
+
+    @property
+    def ok(self) -> bool:
+        return not self.missing and not self.unexpected
+
+
 class CampaignCheck(BaseModel):
     name: str
     residual_source_tags: list[str]
@@ -102,6 +124,7 @@ class ReconciliationReport(BaseModel):
     list_id: int
     consent_counts: list[CountCheck]
     suppression: SuppressionIntegrity
+    membership: MembershipCheck
     segments: list[SegmentCheck]
     checksums: ChecksumCheck
     campaigns: list[CampaignCheck]
@@ -111,6 +134,7 @@ class ReconciliationReport(BaseModel):
         return (
             all(c.ok for c in self.consent_counts)
             and not self.suppression.violations
+            and self.membership.ok
             and all(s.ok for s in self.segments)
             and not self.checksums.mismatches
             and all(not c.residual_source_tags and c.render_matches for c in self.campaigns)
@@ -156,6 +180,14 @@ def build_reconciliation(
     list_id: int,
 ) -> ReconciliationReport:
     current = client.current_subscribers(list_id)
+
+    plan_emails = {d.email.lower() for d in plan.all_subscribers}
+    membership = MembershipCheck(
+        expected=len(plan_emails),
+        actual=len(current),
+        missing=sorted(plan_emails - current.keys()),
+        unexpected=sorted(current.keys() - plan_emails),
+    )
 
     expected_counts: dict[tuple[str, str], int] = {}
     for d in plan.all_subscribers:
@@ -255,6 +287,7 @@ def build_reconciliation(
         list_id=list_id,
         consent_counts=consent_counts,
         suppression=suppression,
+        membership=membership,
         segments=segments,
         checksums=checksums,
         campaigns=campaign_checks,
@@ -296,6 +329,21 @@ def render_markdown(report: ReconciliationReport) -> str:
         f"{s.non_subscribable:,} of {s.total:,} suppressed addresses are "
         f"non-subscribable in the target ({s.pct}%)."
         + (f" VIOLATIONS: {', '.join(s.violations[:10])}" if s.violations else ""),
+        "## Membership (every address, both directions)",
+        f"{report.membership.actual:,} addresses in the target list vs "
+        f"{report.membership.expected:,} planned: "
+        f"{len(report.membership.missing):,} missing, "
+        f"{len(report.membership.unexpected):,} unexpected."
+        + (
+            f" MISSING: {', '.join(report.membership.missing[:10])}"
+            if report.membership.missing
+            else ""
+        )
+        + (
+            f" UNEXPECTED: {', '.join(report.membership.unexpected[:10])}"
+            if report.membership.unexpected
+            else ""
+        ),
         "## Segment parity",
         "\n".join(
             [
@@ -305,7 +353,8 @@ def render_markdown(report: ReconciliationReport) -> str:
             + [
                 f"| {seg.name} | {seg.target_count:,} | "
                 f"{seg.plan_count if seg.plan_count is not None else 'not evaluated'} | "
-                f"{seg.source_count:,} | {'yes' if seg.ok else 'NO'} |"
+                f"{seg.source_count:,} | "
+                f"{'yes' if seg.ok else ('UNVERIFIED' if not seg.verified else 'NO')} |"
                 for seg in report.segments
             ]
         ),
