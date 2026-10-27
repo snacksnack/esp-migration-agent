@@ -2,10 +2,13 @@
 
 Written the way a real engagement would be papered: the statement of work up
 front, the acceptance report at the end, both signed against numbers the
-engine computed rather than estimates anyone wrote down. The "customer" is
-the reference account this repository ships as its fixture - a genuine
-Mailchimp export of a 4,500-member account (ADR-0001) - migrated end to end
-into a live Brevo account. Every figure below traces to a committed artifact.
+engine computed rather than estimates anyone wrote down. The engine itself
+is ESP-agnostic (the mapping spec is canonical; platforms live in adapters
+behind one protocol); this document is one concrete engagement run through
+it. The "customer" is the reference account this repository ships as its
+fixture - a genuine Mailchimp export of a 4,500-member account (ADR-0001) -
+migrated end to end into a live Brevo account. Every figure below traces to
+a committed artifact.
 
 ## Statement of work
 

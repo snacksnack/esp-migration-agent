@@ -36,6 +36,12 @@ The schema cannot even represent a spec that violates it
 
 ## Source and targets
 
+The engine is ESP-agnostic by design: the mapping spec is canonical, and
+platform differences live in adapters behind one protocol (ADR-0007), so a
+new target is an adapter, not a rewrite. The platforms below are the worked
+engagement, not the product's edges - today's source parsers cover
+Mailchimp; Listmonk and Brevo already sit behind the same `--target` flag.
+
 - Source: Mailchimp export bundle. The committed fixture is a genuine export
   of a free account seeded with Faker data - real format, synthetic data
   (ADR-0001).
