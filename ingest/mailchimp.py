@@ -125,7 +125,35 @@ def load_audience_dir(
         members[bucket] = load_audience_csv(matches[0], bucket, account_tz)
         if not members[bucket]:
             raise IngestError(f"{matches[0].name}: no member rows")
+    _refuse_duplicate_emails(members)
     return members
+
+
+def _refuse_duplicate_emails(
+    members: dict[ConsentBucket, list[SubscriberRecord]],
+) -> None:
+    """An address appearing twice is a malformed export, and across buckets it
+    is a consent conflict the plan would act on twice - phase 1 suppresses,
+    phase 2 upserts right back. No automatic winner: a human resolves the
+    export (RC1-563)."""
+    buckets_by_email: dict[str, list[str]] = {}
+    for bucket, records in members.items():
+        for record in records:
+            buckets_by_email.setdefault(record.email, []).append(bucket.value)
+    conflicts = {
+        email: buckets for email, buckets in buckets_by_email.items() if len(buckets) > 1
+    }
+    if conflicts:
+        shown = ", ".join(
+            f"{email} ({'+'.join(buckets)})"
+            for email, buckets in sorted(conflicts.items())[:5]
+        )
+        more = f" and {len(conflicts) - 5} more" if len(conflicts) > 5 else ""
+        raise IngestError(
+            f"{len(conflicts)} address(es) appear more than once across the "
+            f"audience export: {shown}{more}. Consent is ambiguous; resolve "
+            "the export before migrating (no bucket silently wins)."
+        )
 
 
 def _load_json(path: Path) -> list[dict]:
