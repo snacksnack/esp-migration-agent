@@ -56,8 +56,9 @@ stage in Datadog.
 
 ## 2. Discovery review with the client
 
-1. Run `uv run python -m discovery.report --narrate` and send the rendered
-   report ahead of the meeting.
+1. Run `uv run python -m discovery.report --narrate --html report.html` and
+   send the rendered report ahead of the meeting - the HTML render is the
+   client-facing version, with the audience profile drawn as charts.
 2. Walk the client through, in order: audience profile, inventory (lists,
    fields with observed formats, segments, templates, suppressions, consent
    states), the severity-ranked risk register, and the scope-and-estimate
