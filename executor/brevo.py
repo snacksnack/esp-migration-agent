@@ -28,12 +28,15 @@ suppressed contacts land emailBlacklisted. Needs ESP_BREVO_API_KEY.
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 
 import httpx
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from executor.plan import DesiredSubscriber, PlannedCampaign
 from executor.queries import evaluate_query
+from executor.retries import IDEMPOTENT_METHODS, Recovered, call_with_retries
 from executor.target import TargetError, TargetSubscriber
 
 BREVO_API = "https://api.brevo.com/v3"
@@ -161,20 +164,46 @@ def consent_from_brevo(label: str | None, blacklisted: bool) -> tuple[str, str]:
 
 
 class BrevoClient:
-    def __init__(self, api_key: str):
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        # transport/sleep are injection points for the no-network failure
+        # matrix (RC1-570): httpx.MockTransport in, recorded backoffs out.
         self._http = httpx.Client(
             base_url=BREVO_API,
             headers={"api-key": api_key, "accept": "application/json"},
             timeout=60,
+            transport=transport,
         )
+        self._sleep = sleep
         self._defined_attributes: set[str] | None = None
 
-    def _call(self, method: str, path: str, what: str, ok_codes: set[int] | None = None,
-              **kwargs) -> dict:
-        try:
-            resp = self._http.request(method, path, **kwargs)
-        except httpx.HTTPError as exc:
-            raise TargetError(f"{what}: connection error: {exc}") from exc
+    def _call(
+        self,
+        method: str,
+        path: str,
+        what: str,
+        ok_codes: set[int] | None = None,
+        replay_safe: bool | None = None,
+        recover: Callable[[], dict | None] | None = None,
+        **kwargs,
+    ) -> dict:
+        if replay_safe is None:
+            replay_safe = method in IDEMPOTENT_METHODS
+        result = call_with_retries(
+            lambda: self._http.request(method, path, **kwargs),
+            what=what,
+            replay_safe=replay_safe,
+            recover=recover,
+            sleep=self._sleep,
+        )
+        if isinstance(result, Recovered):
+            return result.data
+        resp = result
         if resp.status_code >= 400 and resp.status_code not in (ok_codes or set()):
             raise TargetError(f"{what}: HTTP {resp.status_code} {resp.text[:300]}")
         return resp.json() if resp.content else {}
@@ -197,11 +226,22 @@ class BrevoClient:
             if offset >= data.get("count", 0) or not rows:
                 return
 
-    def _ensure_folder(self) -> int:
+    def _find_folder(self) -> int | None:
         for row in self._lookup_pages("/contacts/folders", "list folders", "folders"):
             if row["name"] == FOLDER_NAME:
                 return row["id"]
+        return None
+
+    def _recover_folder(self) -> dict | None:
+        found = self._find_folder()
+        return None if found is None else {"id": found}
+
+    def _ensure_folder(self) -> int:
+        found = self._find_folder()
+        if found is not None:
+            return found
         created = self._call("POST", "/contacts/folders", "create folder",
+                             recover=self._recover_folder,
                              json={"name": FOLDER_NAME})
         return created["id"]
 
@@ -211,6 +251,10 @@ class BrevoClient:
                 return row["id"]
         return None
 
+    def _recover_list(self, name: str) -> dict | None:
+        found = self.find_list(name)
+        return None if found is None else {"id": found}
+
     def ensure_list(self, name: str) -> int:
         found = self.find_list(name)
         if found is not None:
@@ -219,6 +263,7 @@ class BrevoClient:
             "POST",
             "/contacts/lists",
             f"create list {name!r}",
+            recover=lambda: self._recover_list(name),
             json={"name": name, "folderId": self._ensure_folder()},
         )
         return created["id"]
@@ -238,11 +283,14 @@ class BrevoClient:
                 continue
             attr_type = "float" if isinstance(sample, int) else "text"
             # 409 = already exists (raced or pre-existing): fine either way.
+            # That tolerance also makes a replay after an ambiguous failure
+            # safe: a landed define answers the retry with an accepted 409.
             self._call(
                 "POST",
                 f"/contacts/attributes/normal/{name}",
                 f"define attribute {name}",
                 ok_codes={409},
+                replay_safe=True,
                 json={"type": attr_type},
             )
             self._defined_attributes.add(name)
@@ -304,6 +352,7 @@ class BrevoClient:
             "/contacts",
             f"create contact {desired.email}",
             ok_codes={204},  # updateEnabled returns 204 when it updated instead
+            replay_safe=True,  # updateEnabled makes this POST an upsert
             json=self._contact_body(desired, list_id),
         )
 
@@ -360,16 +409,20 @@ class BrevoClient:
             "recipients": {"listIds": [list_id]},
         }
 
+    def _find_campaign_row(self, name: str) -> dict | None:
+        return next((r for r in self._campaign_rows() if r["name"] == name), None)
+
     def create_campaign(self, campaign: PlannedCampaign, list_id: int) -> None:
         self._call(
             "POST",
             "/emailCampaigns",
             f"create campaign {campaign.name!r}",
+            recover=lambda: self._find_campaign_row(campaign.name),
             json=self._campaign_body(campaign, list_id),
         )
 
     def update_campaign(self, name: str, campaign: PlannedCampaign, list_id: int) -> None:
-        row = next((r for r in self._campaign_rows() if r["name"] == name), None)
+        row = self._find_campaign_row(name)
         if row is None:
             raise TargetError(f"campaign {name!r} vanished between diff and write")
         self._call(
