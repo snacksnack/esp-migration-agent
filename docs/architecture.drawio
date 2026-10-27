@@ -1,0 +1,216 @@
+<mxfile host="app.diagrams.net" modified="2026-10-26T00:00:00.000Z" agent="esp-migration-agent" version="24.7.17">
+  <diagram id="esp-system-view" name="System view">
+    <mxGraphModel dx="1200" dy="800" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1720" pageHeight="1000" math="0" shadow="0" background="#ffffff">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Title -->
+        <mxCell id="title" value="&lt;b&gt;ESP Migration Agent — system view&lt;/b&gt;" style="text;html=1;align=left;verticalAlign=middle;fontSize=20;" vertex="1" parent="1">
+          <mxGeometry x="250" y="0" width="520" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Trust boundary: the LLM proposes, deterministic Python validates, a human approves. The model never touches the source or the target." style="text;html=1;align=right;verticalAlign=middle;fontSize=12;fontStyle=2;fontColor=#555555;" vertex="1" parent="1">
+          <mxGeometry x="790" y="0" width="800" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- Trust zones -->
+        <mxCell id="zoneL" value="LLM proposes — claude-opus-5-5 via the Anthropic API (no write path, no decisions)" style="rounded=1;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=top;fontSize=13;fontStyle=1;align=left;spacingLeft=12;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="430" y="40" width="620" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="zoneP" value="Deterministic Python validates — every number computed; the schema keeps bad states unrepresentable&lt;br&gt;&lt;font style=&quot;font-size: 11px&quot;&gt;&lt;i&gt;runs as a local CLI (uv run) on the operator&amp;#39;s workstation — no hosted service anywhere in the pipeline&lt;/i&gt;&lt;/font&gt;" style="rounded=1;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontSize=13;fontStyle=1;align=left;spacingLeft=12;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="250" y="250" width="1140" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="zoneH" value="Human approves — nothing downstream runs without sign-off" style="rounded=1;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;fontSize=13;fontStyle=1;align=left;spacingLeft=12;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="250" y="530" width="1140" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="zoneO" value="Telemetry &amp;amp; evals — Datadog (SaaS) + eval store (Heroku Postgres)" style="rounded=1;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontSize=13;fontStyle=1;align=left;spacingLeft=12;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="250" y="740" width="1340" height="160" as="geometry" />
+        </mxCell>
+
+        <!-- Source -->
+        <mxCell id="src" value="&lt;b&gt;Mailchimp export bundle&lt;/b&gt;&lt;br&gt;UI export from Mailchimp (SaaS); customer export or committed fixture (ADR-0001)" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;size=12;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="20" y="320" width="170" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- LLM lane -->
+        <mxCell id="narr" value="&lt;b&gt;discovery.narrator&lt;/b&gt;&lt;br&gt;narrates precomputed aggregates — the only LLM call in discovery" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="450" y="90" width="280" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="prop" value="&lt;b&gt;mapping.proposer&lt;/b&gt;&lt;br&gt;field / segment / consent mappings, each with confidence + rationale; ambiguity is flagged, never guessed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="750" y="90" width="280" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Pipeline -->
+        <mxCell id="ing" value="&lt;b&gt;ingest/&lt;/b&gt;&lt;br&gt;deterministic bundle parsers; malformed input is a loud IngestError" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="270" y="310" width="140" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="disc" value="&lt;b&gt;discovery/&lt;/b&gt;&lt;br&gt;audience profile, inventory, severity-ranked risk register, scope proposal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="430" y="310" width="140" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="draft" value="&lt;b&gt;specs/drafts/&lt;/b&gt;&lt;br&gt;pydantic MappingSpec YAML; Python owns the spec shell" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="590" y="310" width="140" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="gate" value="&lt;b&gt;mapping.gate&lt;/b&gt;&lt;br&gt;approve() refuses open questions; pins sha256; load_approved() is the only downstream door" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="750" y="310" width="140" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="exec" value="&lt;b&gt;executor/&lt;/b&gt;&lt;br&gt;plan invariant, dry-run diff, idempotent upserts. &lt;b&gt;Suppressions first&lt;/b&gt; — structural, not procedural" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="910" y="310" width="140" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="recon" value="&lt;b&gt;executor.reconcile&lt;/b&gt;&lt;br&gt;consent counts, 100% suppression integrity, segment parity, sampled checksums" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="310" width="140" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="cut" value="&lt;b&gt;executor.cutover&lt;/b&gt;&lt;br&gt;freeze window, final delta pass, sending ramp, rollback plan" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1230" y="310" width="140" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Human lane -->
+        <mxCell id="hrev" value="&lt;b&gt;Discovery review&lt;/b&gt;&lt;br&gt;walk the client through risks, scope, consent semantics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="400" y="575" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="happr" value="&lt;b&gt;Spec sign-off&lt;/b&gt;&lt;br&gt;mapping.review approve --by &amp;lt;owner&amp;gt;; every open question resolved first" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="690" y="575" width="220" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="hdry" value="&lt;b&gt;Dry-run diff review&lt;/b&gt;&lt;br&gt;no unexpected creates / updates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="940" y="575" width="180" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="hgo" value="&lt;b&gt;Reconciliation sign-off&lt;/b&gt;&lt;br&gt;PASS required; any FAIL stops the cutover clock" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="575" width="220" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- Targets -->
+        <mxCell id="tgt" value="&lt;b&gt;Target protocol&lt;/b&gt; — executor/target.py&lt;br&gt;&lt;font style=&quot;font-size: 10px&quot;&gt;spec stays canonical; the adapter translates and reverses on read (ADR-0007)&lt;/font&gt;" style="rounded=1;html=1;whiteSpace=wrap;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;fontSize=12;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="280" width="200" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="lm" value="Listmonk — self-hosted (local docker compose; CI e2e)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="346" width="160" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="brevo" value="Brevo — SaaS free tier (live demo)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="392" width="160" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Observability -->
+        <mxCell id="obsL" value="&lt;b&gt;Datadog LLM Obs&lt;/b&gt;&lt;br&gt;ml_app: esp-migration-agent; version-tagged root spans; prompt-injection judges" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="270" y="790" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="obsM" value="&lt;b&gt;esp_migration.* metrics&lt;/b&gt;&lt;br&gt;pipeline_run, gate_approval, executor_writes, executor_write_errors, reconcile_result" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="530" y="790" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="obsD" value="&lt;b&gt;Dashboard, monitors, SLOs&lt;/b&gt;&lt;br&gt;as code in tpm-automation-platform; daily drift CI; cost-per-stage monitor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="790" y="790" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="obsR" value="&lt;b&gt;DORA&lt;/b&gt;&lt;br&gt;GitHub Actions release.yml: v* tag → release → Datadog deployment event" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="790" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="obsE" value="&lt;b&gt;Eval store&lt;/b&gt;&lt;br&gt;esp-mapping-quality: flag recall + precision over frozen payloads; shared Heroku Postgres store; trend published per run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="790" width="240" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- Pipeline edges -->
+        <mxCell id="e_src" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="src" target="ing">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_p1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="ing" target="disc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_p2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="draft" target="gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_p3" value="approved spec only,&#10;via load_approved()" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;" edge="1" parent="1" source="gate" target="exec">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint as="offset" x="0" y="80" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_p4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="exec" target="recon">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_p5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;" edge="1" parent="1" source="recon" target="cut">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- LLM lane edges -->
+        <mxCell id="e_narr" value="aggregates in,&#10;narrative out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;startArrow=classic;startFill=1;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="disc" target="narr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_inv" value="inventory + observed formats" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.75;exitY=0;entryX=0.25;entryY=1;" edge="1" parent="1" source="disc" target="prop">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="535" y="230" />
+              <mxPoint x="820" y="230" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_prop" value="proposal — Python builds the spec shell" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.75;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="prop" target="draft">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="960" y="215" />
+              <mxPoint x="660" y="215" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Human lane edges -->
+        <mxCell id="e_hrev" value="markdown report" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="disc" target="hrev">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_happr" value="client edits resolve open questions;&#10;any later edit = re-approval" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="happr" target="gate">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_hdry" value="dry-run diff down,&#10;--execute up" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;startArrow=classic;startFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="exec" target="hdry">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_hgo" value="sign-off report" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.5;exitY=1;entryX=0.25;entryY=0;" edge="1" parent="1" source="recon" target="hgo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_go" value="go" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.75;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="hgo" target="cut">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Target edges -->
+        <mxCell id="e_write" value="writes — idempotent upserts, suppressions phase first" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.5;exitY=0;entryX=0.5;entryY=0;" edge="1" parent="1" source="exec" target="tgt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="980" y="220" />
+              <mxPoint x="1550" y="220" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_read" value="read-back verification" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;exitX=0.9;exitY=1;entryX=0.85;entryY=1;" edge="1" parent="1" source="recon" target="tgt">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1196" y="500" />
+              <mxPoint x="1620" y="500" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Telemetry edges (dashed) -->
+        <mxCell id="e_obs1" value="every LLM call traced" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;exitX=0;exitY=0.8;entryX=0;entryY=0.5;" edge="1" parent="1" source="zoneL" target="obsL">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="225" y="160" />
+              <mxPoint x="225" y="835" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_obs2" value="every stage emits counts" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;exitX=0;exitY=0.9;entryX=0.5;entryY=1;" edge="1" parent="1" source="zoneP" target="obsM">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="210" y="448" />
+              <mxPoint x="210" y="950" />
+              <mxPoint x="650" y="950" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e_obs3" value="frozen payloads → recall / precision per release" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=10;dashed=1;strokeColor=#9673a6;exitX=0.5;exitY=0;entryX=1;entryY=0.5;" edge="1" parent="1" source="prop" target="obsE">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="890" y="55" />
+              <mxPoint x="1675" y="55" />
+              <mxPoint x="1675" y="835" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
