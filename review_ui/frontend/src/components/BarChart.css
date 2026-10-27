@@ -1,0 +1,42 @@
+.bc {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+.bc h3 {
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+}
+.bc-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  column-gap: 10px;
+  margin: 6px 0;
+}
+.bc-cat {
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.bc-track {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.bc-fill {
+  height: 16px;
+  background: var(--bar);
+  border-radius: 0 4px 4px 0;
+  flex: none;
+}
+.bc-val {
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

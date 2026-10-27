@@ -1,0 +1,52 @@
+/* Shared tokens, lifted from discovery/html_report.py (RC1-559) so the
+   review UI and the emailed discovery report read as one system. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-muted: #898781;
+  --hairline: #e1e0d9;
+  --bar: #2a78d6;
+  --border: rgba(11, 11, 11, 0.1);
+  --ok: #2e7d4f;
+  --flagged: #d03b3b;
+  --warn: #ec835a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --ink-muted: #898781;
+    --hairline: #2c2c2a;
+    --bar: #3987e5;
+    --border: rgba(255, 255, 255, 0.1);
+    --ok: #4caf7d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+button {
+  font: inherit;
+}
+input,
+textarea {
+  font: inherit;
+  color: var(--ink);
+  background: var(--page);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 6px 8px;
+}

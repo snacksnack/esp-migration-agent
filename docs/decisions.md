@@ -3,6 +3,38 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0010: The review-gate UI is a front end, never a second gate (2026-10-27)
+
+**Decision.** RC1-560 adds a browser surface for stage 4: a React/Vite app
+(`review_ui/frontend/`) over a thin FastAPI backend (`review_ui/api.py`). The
+backend wraps the existing gate functions and decides nothing itself:
+
+- The draft YAML on disk stays the document of record. A resolution PATCH
+  round-trips through `MappingSpec` validation and rewrites the file, so UI
+  edits obey flag-don't-guess exactly as hand edits do (a flagged mapping
+  cannot leave the form without a target - the schema refuses, not the UI).
+- Approval is `mapping.gate.approve` with a named owner; the sha256 pin and
+  the `specs/approved/` output are unchanged, and a refusal returns 409
+  carrying the gate's own message, rendered verbatim in the UI - the browser
+  equivalent of the CLI's non-zero exit.
+- Discovery context comes from a `DiscoveryReport` JSON endpoint (the same
+  model both report renders read), with the spec's open questions merged into
+  the risk register exactly as `discovery.report --spec` does. Charts reuse
+  the RC1-559 idiom and tokens: single-hue bars, values at the tips, status
+  colors reserved for severity/status.
+- A stale-index guard: each PATCH carries the mapping's source identity and
+  is refused with 409 if the file changed underneath the browser.
+
+Dev is two processes, reid_basic style: `python -m review_ui` on :8542 and
+the Vite dev server proxying `/api`. A production build (`npm run build`) is
+served by the backend alone from `frontend/dist`. FastAPI/uvicorn live in the
+optional `ui` dependency group, like `obs`: the migration pipeline never
+imports them. Frontend components follow reid_basic conventions (one
+component per file, dedicated props interfaces, co-located CSS, local
+useState); vitest runs as its own CI job. The demo arc (`scripts/demo.sh`)
+stays CLI-only for now - the UI is demoed live, not recorded, until it earns
+a beat there.
+
 ## ADR-0009: The eval measures flag discipline from both sides (2026-10-26)
 
 **Decision.** The agent-evals subject `esp-mapping-quality` (RC1-548) runs the
