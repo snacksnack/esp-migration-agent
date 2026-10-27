@@ -1,8 +1,17 @@
 name: CI
 
+# push is scoped to main so a PR commit runs once (the pull_request event),
+# not twice (RC1-558). The listmonk e2e lives in e2e.yml with a paths filter.
 on:
   push:
+    branches: [main]
   pull_request:
+
+# A follow-up push cancels the superseded run, except on main, where every
+# run completes (Test Optimization history and the DORA trail stay whole).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -41,31 +50,3 @@ jobs:
           DD_SERVICE: esp-migration-agent
           DD_ENV: ci
         run: uv run pytest --ddtrace --cov
-
-  # RC1-546: the full fixture into a real Listmonk, reconciliation at 100%,
-  # second run converging to zero writes. Runs on every push, same as units -
-  # a migration engine whose e2e only runs on demand is not tested.
-  listmonk-e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
-          enable-cache: true
-
-      # --all-groups: pytest collects every test module before -m deselects,
-      # so the scorer tests' agent_evals import must resolve here too.
-      - name: Sync
-        run: uv sync --all-groups
-
-      - name: Start Listmonk
-        run: docker compose up -d --wait
-
-      - name: Bootstrap API user
-        run: uv run python -m executor.bootstrap >> "$GITHUB_ENV"
-
-      - name: Integration tests
-        run: uv run pytest -m integration -v

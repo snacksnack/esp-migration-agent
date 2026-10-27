@@ -1,0 +1,73 @@
+name: Listmonk e2e
+
+# RC1-546: the full fixture into a real Listmonk, reconciliation at 100%,
+# second run converging to zero writes. RC1-558 moved it here from ci.yml
+# with a paths filter: it runs on every change that can alter migration
+# behavior, on PRs and on main, and skips the ~17-minute run for docs-only
+# changes, which cannot. Sampling the fixture was rejected - a 600-row e2e
+# weakens the enumerated suppression-integrity claim this job exists to hold.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "executor/**"
+      - "ingest/**"
+      - "mapping/**"
+      - "specs/**"
+      - "seeding/**"
+      - "fixtures/**"
+      - "discovery/**"
+      - "telemetry/**"
+      - "tests/**"
+      - "docker-compose.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/e2e.yml"
+  pull_request:
+    paths:
+      - "executor/**"
+      - "ingest/**"
+      - "mapping/**"
+      - "specs/**"
+      - "seeding/**"
+      - "fixtures/**"
+      - "discovery/**"
+      - "telemetry/**"
+      - "tests/**"
+      - "docker-compose.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/e2e.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  listmonk-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      # --all-groups: pytest collects every test module before -m deselects,
+      # so the scorer tests' agent_evals import must resolve here too.
+      - name: Sync
+        run: uv sync --all-groups
+
+      - name: Start Listmonk
+        run: docker compose up -d --wait
+
+      - name: Bootstrap API user
+        run: uv run python -m executor.bootstrap >> "$GITHUB_ENV"
+
+      - name: Integration tests
+        run: uv run pytest -m integration -v
