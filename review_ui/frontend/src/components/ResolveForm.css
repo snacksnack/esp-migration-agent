@@ -1,0 +1,39 @@
+.rf {
+  border-top: 1px solid var(--hairline);
+  margin-top: 10px;
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+.rf-row {
+  display: grid;
+  gap: 4px;
+}
+.rf-label {
+  color: var(--ink-2);
+  font-size: 0.78rem;
+}
+.rf-actions {
+  display: flex;
+  gap: 8px;
+}
+.rf-actions button {
+  border: 1px solid var(--hairline);
+  background: var(--page);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.rf-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.rf-primary {
+  border-color: var(--bar);
+}
+.rf-error {
+  color: var(--flagged);
+  font-size: 0.85rem;
+  margin: 0;
+}
