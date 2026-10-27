@@ -17,7 +17,13 @@ import yaml
 from pydantic import ValidationError
 
 from ingest.mailchimp import bundle_fingerprint
-from specs.model import MappingSpec, MappingStatus, SpecStatus, hash_content
+from specs.model import (
+    PROVENANCE_FIELDS,
+    MappingSpec,
+    MappingStatus,
+    SpecStatus,
+    hash_content,
+)
 
 UNRESOLVED = (MappingStatus.PROPOSED, MappingStatus.FLAGGED)
 
@@ -58,11 +64,11 @@ def approve(spec: MappingSpec, approved_by: str, now: datetime | None = None) ->
             f"cannot approve: {len(unresolved)} unresolved mapping(s) ({labels}). "
             "Resolve each to approved/edited in the YAML, answering any open questions."
         )
-    exclude = {"approval"}
-    if spec.source_fingerprint is None:
-        # Mirror content_sha256: an unset fingerprint is absent, not null,
-        # so pre-RC1-566 approvals keep their hash.
-        exclude.add("source_fingerprint")
+    # Mirror content_sha256: unset provenance is absent, not null, so older
+    # approvals keep their hash.
+    exclude = {"approval"} | {
+        f for f in PROVENANCE_FIELDS if getattr(spec, f) is None
+    }
     content = spec.model_dump(mode="json", exclude=exclude)
     content["status"] = SpecStatus.APPROVED.value
     approval = {
@@ -90,22 +96,37 @@ def load_approved(path: Path) -> MappingSpec:
     return spec
 
 
-def verify_source(spec: MappingSpec, audience_dir: Path, supplement_dir: Path) -> None:
-    """RC1-566: the approval binds the inputs, not just the spec text. A spec
-    carrying a source fingerprint only runs against the exact export it was
-    reviewed with; a pre-RC1-566 spec without one passes with a loud note."""
+def verify_source(
+    spec: MappingSpec, audience_dir: Path, supplement_dir: Path, account_tz: str
+) -> None:
+    """RC1-566/RC1-569: the approval binds the inputs, not just the spec
+    text - the exact export files AND the timezone they are parsed with
+    (timestamps shift with the tz while the files hash the same). A spec
+    written before a provenance field existed passes it with a loud note."""
     if spec.source_fingerprint is None:
         print(
             "note: spec carries no source fingerprint (pre-RC1-566); "
             "bundle identity is not verified",
             file=sys.stderr,
         )
-        return
-    actual = bundle_fingerprint(audience_dir, supplement_dir)
-    if actual != spec.source_fingerprint:
+    else:
+        actual = bundle_fingerprint(audience_dir, supplement_dir)
+        if actual != spec.source_fingerprint:
+            raise GateError(
+                "source bundle does not match the approved spec: this export "
+                f"fingerprints {actual[:12]}..., the reviewed one "
+                f"{spec.source_fingerprint[:12]}... - re-run discovery and "
+                "review against the current bundle"
+            )
+    if spec.source_timezone is None:
+        print(
+            "note: spec carries no source timezone (pre-RC1-569); "
+            "parse settings are not verified",
+            file=sys.stderr,
+        )
+    elif spec.source_timezone != account_tz:
         raise GateError(
-            "source bundle does not match the approved spec: this export "
-            f"fingerprints {actual[:12]}..., the reviewed one "
-            f"{spec.source_fingerprint[:12]}... - re-run discovery and review "
-            "against the current bundle"
+            f"--account-tz {account_tz!r} does not match the timezone the "
+            f"reviewed bundle was parsed with ({spec.source_timezone!r}); "
+            "the same files would yield different timestamps"
         )

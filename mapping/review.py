@@ -66,12 +66,13 @@ def cmd_propose(args: argparse.Namespace) -> int:
         bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
         spec = propose(bundle, build_inventory(bundle), target=args.target)
     # Stamp the source identity the review (and later the approval) covers
-    # (RC1-566). Python's stamp, never the model's.
+    # (RC1-566/RC1-569). Python's stamp, never the model's.
     spec = spec.model_copy(
         update={
             "source_fingerprint": bundle_fingerprint(
                 args.audience_dir, args.supplement_dir
-            )
+            ),
+            "source_timezone": args.account_tz,
         }
     )
     out: Path = args.out or DRAFTS_DIR / f"{spec.source}_to_{spec.target}.yaml"

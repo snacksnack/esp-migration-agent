@@ -3,6 +3,15 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0014 amendment (RC1-569, 2026-10-27): the parse timezone is an input
+too. The fingerprint hashes the export FILES, but OPTIN_TIME/CONFIRM_TIME
+are localized with --account-tz before converting to UTC, so the same files
+parsed under a different timezone yield different target values. propose now
+also stamps `source_timezone`; verify_source refuses a mismatched
+--account-tz. Same compat rule: unset provenance fields are omitted from
+hashing and YAML, so earlier signed specs keep their hash and run with a
+loud note.
+
 ## ADR-0014: The approval binds the inputs, not just the spec text (2026-10-27)
 
 **Decision.** RC1-566 (external review finding, GPT-6 Astra #5): the approval
