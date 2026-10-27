@@ -3,6 +3,23 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0014: The approval binds the inputs, not just the spec text (2026-10-27)
+
+**Decision.** RC1-566 (external review finding, GPT-6 Astra #5): the approval
+pinned only the spec's content hash, so a signed spec could be executed
+against a different export than the one reviewed, and `--target` could
+disagree with `spec.target` (the plan builds with the spec's consent dialect
+while the writes go to the flag's adapter). Now `mapping.review propose`
+stamps `source_fingerprint` - a sha256 over every file of the export bundle,
+computed by Python, never the model - into the draft; the approval's content
+hash covers it; and both the executor and reconciliation refuse to run when
+the bundle on disk fingerprints differently (`mapping.gate.verify_source`)
+or when `--target != spec.target`. Pre-RC1-566 specs carry no fingerprint
+and keep their original content hash (hashing and YAML omit the field when
+unset, so committed approvals stay valid); they run with a loud stderr note
+that bundle identity is not verified, rather than retroactively invalidating
+signed artifacts.
+
 ## ADR-0013: The executor never downgrades stricter destination consent (2026-10-27)
 
 **Decision.** RC1-568 (external review finding, GPT-6 Astra #6): the engine

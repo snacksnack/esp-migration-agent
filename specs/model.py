@@ -120,6 +120,10 @@ class MappingSpec(BaseModel):
     spec_version: Literal[1] = 1
     source: str
     target: str
+    # sha256 of the export files the proposal was built from (RC1-566): the
+    # approval's content hash covers it, so a signed spec only runs against
+    # the exact bundle that was reviewed. None on pre-RC1-566 specs.
+    source_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     generated_at: datetime
     status: SpecStatus = SpecStatus.DRAFT
     field_mappings: list[FieldMapping] = []
@@ -155,11 +159,18 @@ class MappingSpec(BaseModel):
     def content_sha256(self) -> str:
         """Hash of the reviewed content (everything except the approval block),
         pinned into Approval so the executor runs exactly what was signed off."""
-        return hash_content(self.model_dump(mode="json", exclude={"approval"}))
+        exclude = {"approval"}
+        if self.source_fingerprint is None:
+            # Pre-RC1-566 specs carry no fingerprint; keep their hash stable.
+            exclude.add("source_fingerprint")
+        return hash_content(self.model_dump(mode="json", exclude=exclude))
 
     @classmethod
     def from_yaml(cls, text: str) -> MappingSpec:
         return cls.model_validate(yaml.safe_load(text))
 
     def to_yaml(self) -> str:
-        return yaml.safe_dump(self.model_dump(mode="json"), sort_keys=False)
+        exclude = {"source_fingerprint"} if self.source_fingerprint is None else None
+        return yaml.safe_dump(
+            self.model_dump(mode="json", exclude=exclude), sort_keys=False
+        )
