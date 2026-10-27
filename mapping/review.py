@@ -20,7 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 from discovery.inventory import build_inventory
-from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
+from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, bundle_fingerprint, load_bundle
 from mapping.gate import GateError, approve, load_spec, mapping_label
 from mapping.proposer import ProposalError, propose
 from specs.model import MappingSpec, MappingStatus
@@ -65,6 +65,15 @@ def cmd_propose(args: argparse.Namespace) -> int:
     with stage("propose"), workflow("mapping.propose"):
         bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
         spec = propose(bundle, build_inventory(bundle), target=args.target)
+    # Stamp the source identity the review (and later the approval) covers
+    # (RC1-566). Python's stamp, never the model's.
+    spec = spec.model_copy(
+        update={
+            "source_fingerprint": bundle_fingerprint(
+                args.audience_dir, args.supplement_dir
+            )
+        }
+    )
     out: Path = args.out or DRAFTS_DIR / f"{spec.source}_to_{spec.target}.yaml"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(spec.to_yaml())
