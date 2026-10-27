@@ -45,11 +45,14 @@ proposes, deterministic Python validates, a human approves.
   Resolutions rewrite the draft YAML through MappingSpec validation; approve
   refusals surface the gate's message verbatim as 409s. Run it:
   `python -m review_ui` (+ `npm run dev` in the frontend for the dev loop).
-  Hosted demo (RC1-561, ADR-0011): esp.hihelloreid.com, Fly app
-  `esp-migration-demo`, shared-password gate in `review_ui/auth.py`
-  (school-search pattern; ESP_REVIEW_PASSWORD unset = gate off, so dev/CI/
-  tests are untouched). No volume: the demo resets to the baked-in fixture
-  on restart. Deploys via fly-deploy.yml on CI green (not the e2e).
+  Hosted demo (RC1-561/562, ADR-0011/0012): esp.hihelloreid.com, Fly app
+  `esp-migration-demo`. READ is public and the gate's 409 refusal is public
+  (approve runs the gate before checking identity); every WRITE - resolve
+  and sign-off - needs the approver's HMAC cookie (`review_ui/auth.py`,
+  school-search pattern), so anonymous visitors never change the exhibit;
+  the UI explains via a demo-mode sign-in dialog. ESP_REVIEW_PASSWORD unset
+  = everything open, so dev/CI/tests are untouched. No volume; restart =
+  pristine fixture. Deploys via fly-deploy.yml on CI green (not the e2e).
 - `executor/` - Phases 3-4 (ADR-0006/0007): plan builder, target adapters
   (Listmonk dev, Brevo live demo) behind one protocol picked by --target,
   diff/execute engine, reconciliation, cutover plan, dev-target bootstrap.

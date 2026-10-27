@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
   approveSpec,
-  getMe,
   getReport,
   getSpec,
+  login,
   mappingViews,
   resolveMapping,
   type MappingView,
@@ -12,7 +12,6 @@ import {
   type SpecResponse,
 } from './api'
 import ApprovePanel from './components/ApprovePanel'
-import Login from './components/Login'
 import MappingCard from './components/MappingCard'
 import ProfileCharts from './components/ProfileCharts'
 import StatusTiles from './components/StatusTiles'
@@ -25,45 +24,21 @@ const SECTIONS: { kind: MappingView['kind']; title: string }[] = [
 ]
 
 export default function App() {
-  const [authState, setAuthState] = useState<'checking' | 'login' | 'ok'>('checking')
   const [specResponse, setSpecResponse] = useState<SpecResponse | null>(null)
   const [report, setReport] = useState<Report | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const loadData = () => {
+  useEffect(() => {
+    // Reading is public (RC1-562): the review surface loads for everyone.
+    // The one gated act, a successful sign-off, is handled in ApprovePanel.
     getSpec()
       .then(setSpecResponse)
       .catch((e: Error) => setLoadError(e.message))
     getReport()
       .then(setReport)
       .catch(() => setReport(null)) // charts are context; review works without them
-  }
-
-  useEffect(() => {
-    // The gate (RC1-561): the auth probe decides between the login screen and
-    // the review surface. With the gate off the probe answers authenticated.
-    getMe()
-      .then((me) => {
-        if (me.auth_enabled && !me.authenticated) {
-          setAuthState('login')
-        } else {
-          setAuthState('ok')
-          loadData()
-        }
-      })
-      .catch((e: Error) => setLoadError(e.message))
   }, [])
 
-  if (authState === 'login') {
-    return (
-      <Login
-        onSuccess={() => {
-          setAuthState('ok')
-          loadData()
-        }}
-      />
-    )
-  }
   if (loadError) {
     return (
       <main className="app">
@@ -73,7 +48,7 @@ export default function App() {
       </main>
     )
   }
-  if (authState === 'checking' || !specResponse) return <main className="app">Loading…</main>
+  if (!specResponse) return <main className="app">Loading…</main>
 
   const { path, spec } = specResponse
   const mappings = mappingViews(spec)
@@ -104,7 +79,12 @@ export default function App() {
             {mappings
               .filter((m) => m.kind === kind)
               .map((m) => (
-                <MappingCard key={`${kind}-${m.index}`} mapping={m} onResolve={onResolve} />
+                <MappingCard
+                  key={`${kind}-${m.index}`}
+                  mapping={m}
+                  onResolve={onResolve}
+                  onLogin={login}
+                />
               ))}
           </div>
         </section>
@@ -112,7 +92,7 @@ export default function App() {
 
       <section>
         <h2>Approval</h2>
-        <ApprovePanel openQuestions={openQuestions} onApprove={approveSpec} />
+        <ApprovePanel openQuestions={openQuestions} onApprove={approveSpec} onLogin={login} />
       </section>
 
       {report && (

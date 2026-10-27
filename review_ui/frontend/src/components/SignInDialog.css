@@ -1,0 +1,61 @@
+.sd-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 10;
+}
+.sd-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  width: min(420px, 100%);
+  display: grid;
+  gap: 10px;
+}
+.sd-card h2 {
+  font-size: 1.05rem;
+  margin: 0;
+}
+.sd-message {
+  margin: 0;
+  font-size: 0.9rem;
+}
+.sd-blurb {
+  color: var(--ink-2);
+  font-size: 0.82rem;
+  margin: 0;
+}
+.sd-field {
+  display: grid;
+  gap: 4px;
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}
+.sd-actions {
+  display: flex;
+  gap: 8px;
+}
+.sd-actions button {
+  border: 1px solid var(--hairline);
+  background: var(--page);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.sd-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sd-primary {
+  border-color: var(--bar);
+}
+.sd-error {
+  color: var(--flagged);
+  font-size: 0.85rem;
+  margin: 0;
+}

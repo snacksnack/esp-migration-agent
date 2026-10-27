@@ -3,6 +3,29 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0012: The demo reads public; only a successful sign-off is gated (2026-10-27)
+
+**Decision.** RC1-562 amends ADR-0011's access model so the demo can be
+linked from the portfolio: the SPA, the spec, and the report are public, and
+the whole UI stays interactive - visitors open the review forms, type
+targets, click every button. The gate's refusal is public too: approve runs
+`mapping.gate.approve` first and returns the 409 verbatim to anyone, because
+watching the gate refuse IS the demo. Writes are the approver's alone -
+resolving and a successful sign-off answer 401 anonymously with an
+explanatory message, which the UI presents as a demo-mode dialog ("anyone
+can review, only the named owner signs") offering the approver sign-in and
+retrying the clicked action. Nothing ever changes on disk for an anonymous
+visitor. With no `ESP_REVIEW_PASSWORD` configured everything stays open
+(local dev, CI).
+
+Rationale: an earlier cut of this change made resolving a public write
+(ephemerality as the safety net), but shared mutable state means one
+visitor's edits vandalize or consume the demo for the next - the pristine
+draft with its nine flagged ambiguities is the exhibit, and only the
+approver should be able to change the exhibit. Resolve payloads keep length
+caps as defense in depth. `approved_by` stays free text; real identity
+remains RC1-554.
+
 ## ADR-0011: The hosted demo is ephemeral on purpose (2026-10-27)
 
 **Decision.** RC1-561 hosts the review-gate UI at esp.hihelloreid.com (Fly
