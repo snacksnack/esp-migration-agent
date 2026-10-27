@@ -6,6 +6,11 @@ The agent does the solutions-engineer work; a human approves each gate.
 
 **Thesis: the LLM proposes, deterministic Python validates, a human approves.**
 
+![System view](docs/architecture.svg)
+
+Running this on a real engagement: [docs/playbook.md](docs/playbook.md) is
+the stage-by-stage FDE runbook (access, gates, acceptance criteria, rollback).
+
 ## Pipeline
 
 1. **Ingest** - deterministic parsers over a real Mailchimp export bundle.
@@ -54,6 +59,9 @@ The schema cannot even represent a spec that violates it
 - `seeding/` - deterministic subscriber generator + Mailchimp seeder, and the
   `ground_truth.json` the discovery stage is verified against
 - `fixtures/` - the synthetic export bundle (see fixtures/README.md)
+- `docs/architecture.drawio` - the system view as editable draw.io source;
+  `docs/architecture.svg` is its committed export
+- `docs/playbook.md` - the FDE migration runbook, stage by stage
 - `docs/decisions.md` - ADRs, newest first
 
 ## Commands
