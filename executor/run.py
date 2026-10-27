@@ -22,7 +22,7 @@ from executor.engine import compute_diff, execute, render_diff
 from executor.plan import PlanError, build_plan
 from executor.target import TargetError
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
-from mapping.gate import GateError, load_approved
+from mapping.gate import GateError, load_approved, verify_source
 from telemetry import count, stage
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
@@ -52,6 +52,15 @@ def main() -> int:
     try:
         with stage("execute", mode=mode, target=args.target):
             spec = load_approved(args.spec)
+            # The approval binds the inputs (RC1-566): the adapter must be the
+            # one the spec was reviewed for, and the bundle the one reviewed.
+            if args.target != spec.target:
+                raise PlanError(
+                    f"--target {args.target} does not match the approved spec's "
+                    f"target {spec.target!r}; the plan would write one platform's "
+                    "consent dialect into another"
+                )
+            verify_source(spec, args.audience_dir, args.supplement_dir)
             bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
             plan = build_plan(bundle, spec)
             client = client_for_target(args.target, need_writes=args.execute)
