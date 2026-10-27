@@ -1,17 +1,22 @@
 import { useState } from 'react'
-import type { ApproveResult } from '../api'
+import { ApiError, type ApproveResult } from '../api'
+import SignInDialog from './SignInDialog'
 import './ApprovePanel.css'
 
 interface ApprovePanelProps {
   openQuestions: number
   onApprove: (approvedBy: string) => Promise<ApproveResult>
+  onLogin: (password: string) => Promise<unknown>
 }
 
 // The gate's front door. Approval needs a named owner; a refusal from
 // mapping.gate.approve (open questions remain) renders verbatim - the UI
-// never softens or second-guesses the gate.
-export default function ApprovePanel({ openQuestions, onApprove }: ApprovePanelProps) {
+// never softens or second-guesses the gate, and anyone may trip it (RC1-562).
+// Only a sign-off the gate would accept asks for the approver password: the
+// backend answers 401 at that point, and the sign-in dialog retries.
+export default function ApprovePanel({ openQuestions, onApprove, onLogin }: ApprovePanelProps) {
   const [owner, setOwner] = useState('')
+  const [dialogMessage, setDialogMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ApproveResult | null>(null)
   const [busy, setBusy] = useState(false)
@@ -22,7 +27,11 @@ export default function ApprovePanel({ openQuestions, onApprove }: ApprovePanelP
     try {
       setResult(await onApprove(owner.trim()))
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (e instanceof ApiError && e.status === 401) {
+        setDialogMessage(e.message) // "every gate passes - but signing off needs the approver sign-in"
+      } else {
+        setError(e instanceof Error ? e.message : String(e))
+      }
     } finally {
       setBusy(false)
     }
@@ -69,6 +78,17 @@ export default function ApprovePanel({ openQuestions, onApprove }: ApprovePanelP
         <p className="ap-error" role="alert">
           {error}
         </p>
+      )}
+      {dialogMessage && (
+        <SignInDialog
+          message={dialogMessage}
+          onLogin={onLogin}
+          onSignedIn={() => {
+            setDialogMessage(null)
+            void approve()
+          }}
+          onClose={() => setDialogMessage(null)}
+        />
       )}
     </div>
   )
