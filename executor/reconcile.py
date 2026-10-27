@@ -31,7 +31,7 @@ from pydantic import BaseModel
 from executor.clients import TARGETS, client_for_target
 from executor.plan import MERGE_TAG_RE, DesiredSubscriber, MigrationPlan, build_plan
 from executor.queries import QueryNotEvaluatable, evaluate_query
-from executor.target import TargetClient
+from executor.target import TargetClient, TargetError
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from ingest.models import MailchimpBundle
 from mapping.gate import load_approved
@@ -265,7 +265,13 @@ def reconcile(
     bundle: MailchimpBundle, spec: MappingSpec, client: TargetClient
 ) -> ReconciliationReport:
     plan = build_plan(bundle, spec)
-    list_id = client.ensure_list(plan.list_name)
+    # Reconciliation reads; it never creates the list it is checking (RC1-564).
+    list_id = client.find_list(plan.list_name)
+    if list_id is None:
+        raise TargetError(
+            f"list {plan.list_name!r} not found in the target; nothing to "
+            "reconcile - run the executor first"
+        )
     return build_reconciliation(plan, spec, bundle, client, list_id)
 
 
