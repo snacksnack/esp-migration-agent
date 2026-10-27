@@ -61,9 +61,9 @@ Mailchimp; Listmonk and Brevo already sit behind the same `--target` flag.
   over a thin FastAPI layer that wraps the gate - resolve flagged mappings,
   approve with a named owner, discovery charts alongside; never a bypass.
   Live demo at [esp.hihelloreid.com](https://esp.hihelloreid.com):
-  fixture-seeded, ephemeral, resets on restart (ADR-0011). Browsing and
-  resolving are open to anyone - including tripping the gate's refusal -
-  and only a successful sign-off asks for the approver password (ADR-0012)
+  fixture-seeded, fully browsable by anyone - including tripping the gate's
+  verbatim refusal - while every write (resolving, signing off) is the
+  approver's alone, explained by a demo-mode dialog (ADR-0011/0012)
 - `executor/` - deterministic executor (ADR-0006/0007): plan builder with
   the suppression invariant, Listmonk + Brevo adapters behind one protocol
   (`--target`), dry-run diff, idempotent execution, reconciliation report,

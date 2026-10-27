@@ -4,7 +4,7 @@ import { view } from './helpers'
 
 describe('MappingCard', () => {
   it('shows the open question, confidence and status for a flagged mapping', () => {
-    render(<MappingCard mapping={view()} onResolve={vi.fn()} />)
+    render(<MappingCard mapping={view()} onResolve={vi.fn()} onLogin={vi.fn()} />)
     expect(screen.getByText('How should the truncated ZIPs be handled?')).toBeInTheDocument()
     expect(screen.getByText('30%')).toBeInTheDocument()
     expect(screen.getByText('flagged')).toBeInTheDocument()
@@ -16,6 +16,7 @@ describe('MappingCard', () => {
       <MappingCard
         mapping={view({ status: 'edited', openQuestion: null, target: 'attribs.zip' })}
         onResolve={vi.fn()}
+        onLogin={vi.fn()}
       />,
     )
     expect(screen.getByText('attribs.zip')).toBeInTheDocument()

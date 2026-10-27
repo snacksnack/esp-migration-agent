@@ -79,7 +79,12 @@ export default function App() {
             {mappings
               .filter((m) => m.kind === kind)
               .map((m) => (
-                <MappingCard key={`${kind}-${m.index}`} mapping={m} onResolve={onResolve} />
+                <MappingCard
+                  key={`${kind}-${m.index}`}
+                  mapping={m}
+                  onResolve={onResolve}
+                  onLogin={login}
+                />
               ))}
           </div>
         </section>
