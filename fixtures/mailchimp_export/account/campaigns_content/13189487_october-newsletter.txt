@@ -1,0 +1,13 @@
+** The Monthly Dispatch
+------------------------------------------------------------
+
+Hi *|FNAME|*,
+
+Here is what's new this month for our readers in *|STATE|*.
+
+Your last purchase was on *|LASTPURCH|* - we picked a few things you might like since then.
+
+- The Dispatch team
+------------------------------------------------------------
+
+Unsubscribe (*|UNSUB|*) | View in browser (*|ARCHIVE|*)
