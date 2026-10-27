@@ -14,6 +14,7 @@ Usage: bundle = load_bundle(audience_dir, supplement_dir)
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import re
 from datetime import UTC, datetime
@@ -222,6 +223,20 @@ def load_campaigns(supplement_dir: Path) -> list[CampaignMeta]:
         except (KeyError, ValidationError) as exc:
             raise IngestError(f"campaigns.json: bad campaign {raw.get('id')!r}: {exc}") from exc
     return campaigns
+
+
+def bundle_fingerprint(audience_dir: Path, supplement_dir: Path) -> str:
+    """sha256 over every file the bundle is parsed from, sorted by name: the
+    source identity a spec's approval pins, so the executor only runs against
+    the exact export that was reviewed (RC1-566)."""
+    digest = hashlib.sha256()
+    for directory in (audience_dir, supplement_dir):
+        for path in sorted(p for p in directory.iterdir() if p.is_file()):
+            digest.update(path.name.encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def load_bundle(

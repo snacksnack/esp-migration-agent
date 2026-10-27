@@ -34,7 +34,7 @@ from executor.queries import QueryNotEvaluatable, evaluate_query
 from executor.target import TargetClient, TargetError
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from ingest.models import MailchimpBundle
-from mapping.gate import load_approved
+from mapping.gate import load_approved, verify_source
 from specs.model import MappingSpec
 from telemetry import count, stage
 
@@ -394,6 +394,14 @@ def main() -> int:
 
     with stage("reconcile", target=args.target):
         spec = load_approved(args.spec)
+        # Same input binding as the executor (RC1-566): reconciling against a
+        # different export or adapter than the approval covers is meaningless.
+        if args.target != spec.target:
+            raise TargetError(
+                f"--target {args.target} does not match the approved spec's "
+                f"target {spec.target!r}"
+            )
+        verify_source(spec, args.audience_dir, args.supplement_dir)
         bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
         client = client_for_target(args.target, need_writes=True)
         report = reconcile(bundle, spec, client)
