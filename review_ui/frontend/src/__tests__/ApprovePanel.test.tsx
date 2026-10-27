@@ -22,12 +22,18 @@ describe('ApprovePanel', () => {
     expect(screen.getByRole('button', { name: 'Approve spec' })).toBeDisabled()
   })
 
-  it("renders the gate's refusal verbatim - no sign-in involved", async () => {
+  it("renders the gate's refusal as a list - no sign-in involved", async () => {
     const onApprove = vi.fn().mockRejectedValue(new ApiError(409, REFUSAL))
     render(<ApprovePanel openQuestions={2} onApprove={onApprove} onLogin={vi.fn()} />)
     typeOwner('Visitor')
     fireEvent.click(screen.getByRole('button', { name: 'Approve spec' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(REFUSAL)
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'cannot approve: 2 unresolved mappings',
+    )
+    expect(screen.getAllByRole('listitem').map((li) => li.textContent)).toEqual([
+      "field 'ZIP'",
+      "field 'LASTPURCH'",
+    ])
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 

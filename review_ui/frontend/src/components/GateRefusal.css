@@ -1,0 +1,25 @@
+.gr {
+  color: var(--flagged);
+  font-size: 0.85rem;
+}
+.gr-plain {
+  margin: 0;
+}
+.gr-head {
+  margin: 0;
+  font-weight: 600;
+}
+.gr-list {
+  margin: 6px 0;
+  padding-left: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  column-gap: 16px;
+}
+.gr-list li {
+  margin: 1px 0;
+}
+.gr-instruction {
+  margin: 6px 0 0;
+  color: var(--ink-2);
+}
