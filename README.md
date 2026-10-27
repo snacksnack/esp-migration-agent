@@ -59,7 +59,9 @@ Mailchimp; Listmonk and Brevo already sit behind the same `--target` flag.
   `mapping.gate.load_approved` is the only door downstream stages read through
 - `review_ui/` - the review gate in the browser (ADR-0010): a React/Vite app
   over a thin FastAPI layer that wraps the gate - resolve flagged mappings,
-  approve with a named owner, discovery charts alongside; never a bypass
+  approve with a named owner, discovery charts alongside; never a bypass.
+  Hosted demo at [esp.hihelloreid.com](https://esp.hihelloreid.com) behind a
+  shared password (ADR-0011): fixture-seeded, ephemeral, resets on restart
 - `executor/` - deterministic executor (ADR-0006/0007): plan builder with
   the suppression invariant, Listmonk + Brevo adapters behind one protocol
   (`--target`), dry-run diff, idempotent execution, reconciliation report,
