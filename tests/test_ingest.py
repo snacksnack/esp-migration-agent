@@ -78,3 +78,45 @@ def test_bad_member_rating_fails_loudly(tmp_path):
 def test_empty_audience_dir_fails_loudly(tmp_path):
     with pytest.raises(IngestError, match="expected exactly one"):
         load_audience_dir(tmp_path)
+
+
+MEMBER_HEADER = ",".join(f'"{c}"' for c in [
+    "Email Address", "First Name", "Last Name", "Zip code", "State",
+    "Last purchase", "MEMBER_RATING", "OPTIN_TIME", "CONFIRM_TIME",
+])
+
+
+def _write_audience(tmp_path, rows_by_bucket):
+    """One CSV per bucket; each row is just an email, the rest is filler."""
+    for bucket in ConsentBucket:
+        rows = "".join(
+            f"{email},A,B,11201,NY,2026-01-01,3,,\n"
+            for email in rows_by_bucket.get(bucket, [f"filler-{bucket.value}@x.com"])
+        )
+        (tmp_path / f"{bucket.value}_x.csv").write_text(f"{MEMBER_HEADER}\n{rows}")
+
+
+def test_cross_bucket_duplicate_fails_loudly(tmp_path):
+    _write_audience(tmp_path, {
+        ConsentBucket.SUBSCRIBED: ["dupe@x.com", "ok@x.com"],
+        ConsentBucket.UNSUBSCRIBED: ["dupe@x.com"],
+    })
+    with pytest.raises(IngestError, match=r"dupe@x\.com \(subscribed\+unsubscribed\)"):
+        load_audience_dir(tmp_path)
+
+
+def test_same_bucket_duplicate_fails_loudly(tmp_path):
+    _write_audience(tmp_path, {
+        ConsentBucket.SUBSCRIBED: ["Dupe@x.com", "dupe@x.com"],
+    })
+    with pytest.raises(IngestError, match="appear more than once"):
+        load_audience_dir(tmp_path)
+
+
+def test_duplicate_refusal_caps_the_listing(tmp_path):
+    _write_audience(tmp_path, {
+        ConsentBucket.SUBSCRIBED: [f"d{i}@x.com" for i in range(7)],
+        ConsentBucket.UNSUBSCRIBED: [f"d{i}@x.com" for i in range(7)],
+    })
+    with pytest.raises(IngestError, match=r"7 address\(es\).*and 2 more"):
+        load_audience_dir(tmp_path)
