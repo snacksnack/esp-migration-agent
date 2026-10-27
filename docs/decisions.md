@@ -3,6 +3,26 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0012: The demo reads public; only a successful sign-off is gated (2026-10-27)
+
+**Decision.** RC1-562 amends ADR-0011's access model so the demo can be
+linked from the portfolio: the SPA, the spec, the report, and resolving
+flagged mappings are public. The gate's refusal is public too - approve runs
+`mapping.gate.approve` first and returns the 409 verbatim to anyone, because
+watching the gate refuse IS the demo. Identity is checked only after the
+gate would pass, before anything is written: a successful sign-off answers
+401 without the approver password, and the password step appears inline in
+the approve panel at that moment. With no `ESP_REVIEW_PASSWORD` configured
+everything stays open (local dev, CI).
+
+Rationale: anonymous visitors working the full review and hitting the
+sign-off wall demonstrates the system's actual claim - anyone can review,
+only the named owner signs - better than a front-door password that hides
+the whole surface. Resolving is a public write, accepted deliberately: the
+demo is ephemeral (ADR-0011, resets on restart), payload fields gained
+length caps, and the draft YAML remains schema-validated on every edit.
+`approved_by` stays free text; real identity remains RC1-554.
+
 ## ADR-0011: The hosted demo is ephemeral on purpose (2026-10-27)
 
 **Decision.** RC1-561 hosts the review-gate UI at esp.hihelloreid.com (Fly

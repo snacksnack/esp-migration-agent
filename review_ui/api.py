@@ -11,7 +11,11 @@ The draft YAML on disk stays the document of record: every PATCH round-trips
 through MappingSpec validation and rewrites the file, so the schema's
 flag-don't-guess and approval invariants hold for UI edits exactly as they do
 for hand edits. Approval is mapping.gate.approve with the named owner - a
-refusal (open questions remain) returns 409 carrying the gate's own message.
+refusal (open questions remain) returns 409 carrying the gate's own message,
+and it is public: reading and resolving need no login (RC1-562). The one
+protected act is a successful sign-off - approve checks the session cookie
+only after the gate passes, so visitors watch every gate work and nobody
+anonymous can sign the migration.
 """
 
 from __future__ import annotations
@@ -49,10 +53,14 @@ class ResolveRequest(BaseModel):
     """A reviewer resolution: the mapping leaves proposed/flagged for
     approved/edited, with the decision recorded in the target/transform."""
 
-    source: str = Field(min_length=1, description="source identity, guards stale indexes")
+    # Length caps: resolving is a public write on the hosted demo (RC1-562),
+    # so the payload is bounded; real reviews never approach these.
+    source: str = Field(
+        min_length=1, max_length=500, description="source identity, guards stale indexes"
+    )
     status: Literal[MappingStatus.APPROVED, MappingStatus.EDITED]
-    target: str | None = None
-    transform: str | None = None
+    target: str | None = Field(default=None, max_length=4000)
+    transform: str | None = Field(default=None, max_length=4000)
 
 
 class ApproveRequest(BaseModel):
@@ -64,11 +72,6 @@ class LoginBody(BaseModel):
     # stringifies hints, and FastAPI resolves them from module globals - a
     # local class silently degrades to a query parameter (school-search lesson).
     password: str
-
-
-# Reachable without the session cookie: login itself, and the auth probe the
-# SPA uses to decide whether to show the login screen.
-OPEN_API_PATHS = frozenset({"/api/login", "/api/me"})
 
 
 def _load(spec_path: Path) -> MappingSpec:
@@ -93,17 +96,9 @@ def create_app(
     app = FastAPI(title="ESP migration review gate", docs_url=None, redoc_url=None)
     report_cache: list[DiscoveryReport] = []  # built once; the bundle never changes mid-session
 
-    @app.middleware("http")
-    async def gate(request: Request, call_next):
-        path = request.url.path
-        if (
-            settings.auth_enabled
-            and path.startswith("/api")
-            and path not in OPEN_API_PATHS
-            and not auth.token_valid(settings, request.cookies.get(auth.COOKIE_NAME))
-        ):
-            return JSONResponse({"detail": "login required"}, status_code=401)
-        return await call_next(request)
+    # No blanket gate (RC1-562): reading and resolving are public - the demo
+    # is ephemeral and resets on restart - and the ONE protected act is a
+    # successful sign-off, checked inside approve_spec after the gate passes.
 
     @app.get("/healthz")
     def healthz() -> dict:
@@ -172,13 +167,23 @@ def create_app(
         return {"path": str(spec_path), "spec": new_spec.model_dump(mode="json")}
 
     @app.post("/api/approve")
-    def approve_spec(body: ApproveRequest) -> dict:
+    def approve_spec(body: ApproveRequest, request: Request) -> dict:
         spec = _load(spec_path)
         try:
             approved = approve(spec, approved_by=body.approved_by)
         except GateError as exc:
             count("gate_approval", tags={"outcome": "refused"})
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # Identity is checked only once the gate would pass: the refusal above
+        # is the demo's centerpiece and stays public, and nothing has been
+        # written yet, so this 401 signs off on nothing (RC1-562).
+        if settings.auth_enabled and not auth.token_valid(
+            settings, request.cookies.get(auth.COOKIE_NAME)
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="every gate passes - but signing off needs the approver login",
+            )
         count("gate_approval", tags={"outcome": "approved"})
         out = approved_dir / spec_path.name
         out.parent.mkdir(parents=True, exist_ok=True)
