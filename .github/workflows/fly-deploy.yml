@@ -1,0 +1,205 @@
+# Deploys the review-gate demo (esp.hihelloreid.com) to Fly and reports the
+# outcome to Datadog DORA. Ported from school-search (RC1-484 lineage) for
+# RC1-561: triggers on CI success (workflow_run), so a red test run never
+# ships. Gates on CI only, not the listmonk e2e - the demo serves the review
+# surface and never runs the executor, and holding a UI deploy ~17 minutes
+# for a migration e2e buys nothing. Service `esp-migration-demo` keeps the
+# demo's DORA trail separate from the repo's tag-driven releases
+# (`esp-migration-agent`, release.yml).
+
+name: Fly Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read   # the close step lists this workflow's own runs
+
+jobs:
+  deploy:
+    name: Deploy app
+    runs-on: ubuntu-latest
+    # Only main pushes whose CI passed. workflow_run is a privileged trigger,
+    # so the checked-out sha must never come from a fork: event == 'push'
+    # guarantees that, and the head_repository check states it directly.
+    if: >
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.conclusion == 'success'
+    concurrency: deploy-group
+    env:
+      DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # DORA's started_at should reflect when delivery began — the push that
+      # started CI — not when this gated job got around to running.
+      - name: Record deploy start
+        env:
+          CI_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
+        run: echo "DEPLOY_STARTED_AT=$(date -d "$CI_STARTED_AT" +%s)" >> "$GITHUB_ENV"
+
+      - run: flyctl deploy --remote-only --build-arg GIT_SHA=$DEPLOY_SHA
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # Gate on boot health (the RC1-355 lesson): flyctl exiting 0 is not
+      # evidence the app runs — with min_machines_running = 0 the machine stops
+      # right after release and a stopped machine's check reports "warning".
+      # Requesting the public URL forces a cold start on the same path a real
+      # request takes. Three consecutive passes, not the first 200: a
+      # crash-loop can answer once before the machine restarts underneath it.
+      - name: Gate on boot health
+        id: boot_gate
+        env:
+          HEALTH_URL: https://esp-migration-demo.fly.dev/healthz
+        run: |
+          set -uo pipefail
+          deadline=$((SECONDS + 180))
+          ok=0
+          while [ "$ok" -lt 3 ]; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::$HEALTH_URL never stayed healthy for 3 consecutive checks within 180s"
+              exit 1
+            fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 "$HEALTH_URL")
+            if [ "$code" = "200" ]; then
+              ok=$((ok + 1))
+              echo "healthy ($ok/3)"
+            else
+              if [ "$ok" -gt 0 ]; then
+                echo "::warning::flapped after $ok consecutive passes (HTTP $code) — possible restart loop"
+              fi
+              ok=0
+              echo "not healthy yet (HTTP $code)"
+            fi
+            [ "$ok" -ge 3 ] || sleep 10
+          done
+          echo "boot health confirmed on $HEALTH_URL"
+
+      # A failed gate is the definition of a change failure: the deploy
+      # completed but the app does not serve. Keyed <service>.<sha>; the next
+      # deploy that passes the gate re-POSTs the same id with finished_at set.
+      - name: Report change failure to Datadog DORA
+        if: failure() && steps.boot_gate.outcome == 'failure'
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          SERVICE: esp-migration-demo
+          REPO_URL: https://github.com/snacksnack/esp-migration-agent
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"data":{"attributes":{"id":"%s.%s","services":["%s"],"env":"prod","severity":"High","name":"%s deploy %.8s failed the boot-health gate","started_at":%s000000000,"git":{"commit_sha":"%s","repository_url":"%s"}}}}' \
+            "$SERVICE" "$DEPLOY_SHA" "$SERVICE" "$SERVICE" "$DEPLOY_SHA" "$(date +%s)" "$DEPLOY_SHA" "$REPO_URL")
+          code=$(curl -s -o resp.json -w '%{http_code}' -m 30 -X POST \
+            -H "DD-API-KEY: $DD_API_KEY" -H "Content-Type: application/json" \
+            -d "$payload" "https://api.datadoghq.com/api/v2/dora/failure")
+          cat resp.json; echo
+          case "$code" in
+            2*) echo "DORA change failure opened (HTTP $code); the next passing deploy closes it";;
+            *) echo "::error::DORA failure POST failed with HTTP $code — change failure rate will undercount"; exit 1;;
+          esac
+
+      # Register the deploy with Datadog DORA. Runs only after the boot gate,
+      # so a DORA deployment event means the app actually serves. Timestamps
+      # are nanoseconds. A failed POST fails the workflow on purpose: an
+      # unrecorded deploy silently undercounts the delivery dashboard.
+      - name: Report deploy to Datadog DORA
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          SERVICE: esp-migration-demo
+          REPO_URL: https://github.com/snacksnack/esp-migration-agent
+        run: |
+          set -euo pipefail
+          payload=$(printf '{"data":{"attributes":{"service":"%s","env":"prod","started_at":%s000000000,"finished_at":%s000000000,"git":{"commit_sha":"%s","repository_url":"%s"}}}}' \
+            "$SERVICE" "$DEPLOY_STARTED_AT" "$(date +%s)" "$DEPLOY_SHA" "$REPO_URL")
+          code=$(curl -s -o resp.json -w '%{http_code}' -m 30 -X POST \
+            -H "DD-API-KEY: $DD_API_KEY" -H "Content-Type: application/json" \
+            -d "$payload" "https://api.datadoghq.com/api/v2/dora/deployment")
+          cat resp.json; echo
+          case "$code" in
+            2*) echo "DORA deployment recorded (HTTP $code)";;
+            *) echo "::error::DORA deployment POST failed with HTTP $code — this deploy is live but unrecorded"; exit 1;;
+          esac
+
+      # Close the change failures this deploy restores. A failure opened above
+      # is keyed <service>.<failing sha>; POSTing that id again with
+      # finished_at set stamps time to restore. Each prior run is checked for
+      # a failed gate step first: POSTing the id of a run that failed before
+      # the gate would fabricate a change failure that never happened.
+      - name: Close restored DORA change failures
+        env:
+          DD_API_KEY: ${{ secrets.DD_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          SERVICE: esp-migration-demo
+          REPO_URL: https://github.com/snacksnack/esp-migration-agent
+          GATE_STEP: Gate on boot health
+        run: |
+          set -euo pipefail
+          finished=$(date +%s)
+
+          gate_failed_at() {
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/attempts/$2/jobs" \
+              --jq '[.jobs[].steps[] | select(.name == env.GATE_STEP and .conclusion == "failure")][0].completed_at // empty'
+          }
+
+          close_failure() { # $1 = failing sha, $2 = gate-failure epoch seconds
+            payload=$(printf '{"data":{"attributes":{"id":"%s.%s","services":["%s"],"env":"prod","severity":"High","name":"%s deploy %.8s failed the boot-health gate — restored by %.8s","started_at":%s000000000,"finished_at":%s000000000,"git":{"commit_sha":"%s","repository_url":"%s"}}}}' \
+              "$SERVICE" "$1" "$SERVICE" "$SERVICE" "$1" "$DEPLOY_SHA" "$2" "$finished" "$1" "$REPO_URL")
+            code=$(curl -s -o resp.json -w '%{http_code}' -m 30 -X POST \
+              -H "DD-API-KEY: $DD_API_KEY" -H "Content-Type: application/json" \
+              -d "$payload" "https://api.datadoghq.com/api/v2/dora/failure")
+            cat resp.json; echo
+            case "$code" in
+              2*) echo "closed DORA change failure $SERVICE.$1 — restored after $((finished - $2))s";;
+              *) echo "::error::close POST for $1 failed with HTTP $code. Do NOT re-run this workflow to retry — that double-counts the deployment event (DORA never dedups). Re-send the close by hand."; exit 1;;
+            esac
+          }
+
+          # This run's own earlier attempts (a re-run to green shares the sha).
+          if [ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]; then
+            a=1
+            while [ "$a" -lt "$GITHUB_RUN_ATTEMPT" ]; do
+              t=$(gate_failed_at "$GITHUB_RUN_ID" "$a")
+              if [ -n "$t" ]; then
+                close_failure "$DEPLOY_SHA" "$(date -d "$t" +%s)"
+                break
+              fi
+              a=$((a + 1))
+            done
+          fi
+
+          # Completed runs of this workflow, newest first; the streak of
+          # failures since the previous success is what this deploy restores.
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/fly-deploy.yml/runs?status=completed&per_page=20" \
+            --jq '.workflow_runs | map(select(.id != (env.GITHUB_RUN_ID | tonumber)))
+                  | (map(.conclusion) | index("success")) as $cut
+                  | (if $cut == null then . else .[:$cut] end)
+                  | map(select(.conclusion == "failure") | [.id, .head_sha, .run_attempt] | @tsv)
+                  | .[]' > streak.tsv
+
+          if [ ! -s streak.tsv ]; then
+            echo "no failed runs since the previous success — nothing to close"
+            exit 0
+          fi
+
+          while IFS=$'\t' read -r rid sha attempts; do
+            t=""
+            a=1
+            while [ "$a" -le "$attempts" ]; do
+              at=$(gate_failed_at "$rid" "$a")
+              if [ -n "$at" ] && [ -z "$t" ]; then t="$at"; fi
+              a=$((a + 1))
+            done
+            if [ -z "$t" ]; then
+              echo "run $rid ($sha) failed before the gate — no change failure to close"
+              continue
+            fi
+            close_failure "$sha" "$(date -d "$t" +%s)"
+          done < streak.tsv

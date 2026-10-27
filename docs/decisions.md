@@ -3,6 +3,36 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0011: The hosted demo is ephemeral on purpose (2026-10-27)
+
+**Decision.** RC1-561 hosts the review-gate UI at esp.hihelloreid.com (Fly
+app `esp-migration-demo`, scale-to-zero) behind the school-search
+shared-password gate, ported nearly verbatim: one password, an HMAC-signed
+expiry cookie, stdlib only (`review_ui/auth.py`). With no
+`ESP_REVIEW_PASSWORD` set the gate is off entirely, so local dev, CI, and
+the tests are untouched. The SPA shell and assets are public; every `/api`
+route except login and the auth probe requires the cookie; `/healthz` stays
+open for the Fly check and the deploy boot gate.
+
+**No volume, deliberately.** The image bakes the fixture bundle and the
+committed draft spec; resolutions and approvals work against the container
+filesystem and a machine restart (which scale-to-zero makes routine) resets
+the demo to pristine. The alternative - a volume - would make the server's
+disk the document of record, detached from git, which is the design the
+local-first UI exists to avoid (ADR-0010). Nothing real is at stake in the
+demo, so ephemerality is a feature: every visitor can approve the spec.
+
+**Access, not identity.** The shared password protects who can see the demo;
+`approved_by` stays free text. Real named-owner identity (SSO + audit log)
+remains RC1-554.
+
+**Deploys** ride `fly-deploy.yml` (school-search pattern): workflow_run on
+CI success, boot-health gate (3x200 on /healthz, forcing a cold start on the
+public URL), DORA deployment/failure events under service
+`esp-migration-demo` - distinct from the repo's tag-driven releases. The
+deploy gates on CI only, not the listmonk e2e: the demo never runs the
+executor.
+
 ## ADR-0010: The review-gate UI is a front end, never a second gate (2026-10-27)
 
 **Decision.** RC1-560 adds a browser surface for stage 4: a React/Vite app

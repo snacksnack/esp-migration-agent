@@ -37,6 +37,7 @@ def main() -> int:
         "matches the discovery.report default so the charts agree",
     )
     parser.add_argument("--port", type=int, default=8542)
+    parser.add_argument("--host", default="127.0.0.1")  # 0.0.0.0 in the container
     args = parser.parse_args()
 
     app = create_app(
@@ -47,7 +48,7 @@ def main() -> int:
         target=args.target,
         as_of=datetime.strptime(args.as_of, "%Y-%m-%d").replace(tzinfo=UTC),
     )
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
 
