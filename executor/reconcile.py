@@ -401,7 +401,7 @@ def main() -> int:
                 f"--target {args.target} does not match the approved spec's "
                 f"target {spec.target!r}"
             )
-        verify_source(spec, args.audience_dir, args.supplement_dir)
+        verify_source(spec, args.audience_dir, args.supplement_dir, args.account_tz)
         bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
         client = client_for_target(args.target, need_writes=True)
         report = reconcile(bundle, spec, client)
