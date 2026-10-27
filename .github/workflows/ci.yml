@@ -50,3 +50,28 @@ jobs:
           DD_SERVICE: esp-migration-agent
           DD_ENV: ci
         run: uv run pytest --ddtrace --cov
+
+  # Review-gate UI (RC1-560): type-check, build, vitest. Node-only; the
+  # backend's API tests run in the python job via the ui dependency group.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: review_ui/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: review_ui/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build (tsc + vite)
+        run: npm run build
+
+      - name: Tests (vitest)
+        run: npm test

@@ -57,6 +57,9 @@ Mailchimp; Listmonk and Brevo already sit behind the same `--target` flag.
   the rendered report; the LLM only narrates computed aggregates
 - `mapping/` - the LLM mapping proposer and the human review gate (ADR-0005);
   `mapping.gate.load_approved` is the only door downstream stages read through
+- `review_ui/` - the review gate in the browser (ADR-0010): a React/Vite app
+  over a thin FastAPI layer that wraps the gate - resolve flagged mappings,
+  approve with a named owner, discovery charts alongside; never a bypass
 - `executor/` - deterministic executor (ADR-0006/0007): plan builder with
   the suppression invariant, Listmonk + Brevo adapters behind one protocol
   (`--target`), dry-run diff, idempotent execution, reconciliation report,
@@ -85,11 +88,17 @@ uv run python -m discovery.report [--narrate] [--spec SPEC.yaml] [--html report.
 uv run python -m mapping.review propose       # stage 3 (draft spec)
 uv run python -m mapping.review status SPEC.yaml      # stage 4 (review)
 uv run python -m mapping.review approve SPEC.yaml --by "Name"
+uv run python -m review_ui                    # stage 4 in the browser (:8542)
 uv run python -m executor.run --spec specs/approved/SPEC.yaml   # stage 5 dry-run
 uv run python -m executor.run --spec ... --execute              # stage 5 write
 uv run python -m executor.reconcile --spec ...                  # stage 6
 uv run python -m executor.cutover --spec ... --out docs/cutover_plan.md
 ```
+
+The review UI needs the `ui` group (`uv sync --group ui`). Dev is two
+processes: the backend above, plus `npm run dev` in `review_ui/frontend`
+(the Vite server proxies `/api`). After `npm run build`, the backend serves
+the built app alone.
 
 End-to-end against a real target: `docker compose up -d`, then
 `eval "$(uv run python -m executor.bootstrap --export)"`, then

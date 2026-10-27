@@ -1,0 +1,10 @@
+.pc-meta {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  margin: 0 0 12px;
+}
+.pc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}

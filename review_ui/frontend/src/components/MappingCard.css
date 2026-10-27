@@ -1,0 +1,77 @@
+.mc {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.mc-flagged {
+  border-left: 3px solid var(--flagged);
+}
+.mc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.mc-source {
+  font-weight: 600;
+}
+.mc-context {
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mc-spacer {
+  flex: 1;
+}
+.mc-confidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.mc-confidence-track {
+  flex: 0 1 160px;
+  height: 6px;
+  background: var(--hairline);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mc-confidence-fill {
+  display: block;
+  height: 100%;
+  background: var(--bar);
+}
+.mc-confidence-val {
+  color: var(--ink-2);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+.mc-rationale,
+.mc-samples {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+  margin: 8px 0 0;
+}
+.mc-question {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  font-size: 0.85rem;
+}
+.mc-target {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+}
+.mc-toggle {
+  margin-top: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--page);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}

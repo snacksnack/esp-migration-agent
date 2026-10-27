@@ -7,3 +7,4 @@ htmlcov/
 .pytest_cache/
 .ruff_cache/
 dist/
+node_modules/

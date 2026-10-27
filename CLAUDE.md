@@ -37,6 +37,14 @@ proposes, deterministic Python validates, a human approves.
   assembles the spec shell, and pre-resolved output is a ProposalError.
   `gate.py::load_approved` is the ONLY door downstream stages read a spec
   through. The review CLI is `python -m mapping.review`.
+- `review_ui/` - the review gate in the browser (RC1-560, ADR-0010): thin
+  FastAPI backend (`api.py`, optional `ui` dependency group) wrapping
+  mapping.gate - it decides nothing the CLI would not - plus the React/Vite
+  frontend in `review_ui/frontend/` (reid_basic conventions: one component
+  per file, props interfaces, co-located CSS; vitest in its own CI job).
+  Resolutions rewrite the draft YAML through MappingSpec validation; approve
+  refusals surface the gate's message verbatim as 409s. Run it:
+  `python -m review_ui` (+ `npm run dev` in the frontend for the dev loop).
 - `executor/` - Phases 3-4 (ADR-0006/0007): plan builder, target adapters
   (Listmonk dev, Brevo live demo) behind one protocol picked by --target,
   diff/execute engine, reconciliation, cutover plan, dev-target bootstrap.
