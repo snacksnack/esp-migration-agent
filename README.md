@@ -62,6 +62,8 @@ The schema cannot even represent a spec that violates it
 - `docs/architecture.drawio` - the system view as editable draw.io source;
   `docs/architecture.svg` is its committed export
 - `docs/playbook.md` - the FDE migration runbook, stage by stage
+- `docs/engagement.md` - the reference engagement written up as a real
+  SOW + acceptance report, every figure traced to a committed artifact
 - `docs/decisions.md` - ADRs, newest first
 
 ## Commands
