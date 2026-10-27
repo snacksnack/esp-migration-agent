@@ -13,7 +13,12 @@ from discovery.inventory import build_inventory
 from discovery.risks import Risk, Severity, sort_risks
 from ingest.mailchimp import load_bundle
 from mapping.gate import GateError, approve, load_approved, load_spec
-from mapping.proposer import ProposalError, assemble_spec, mapping_payload
+from mapping.proposer import (
+    ProposalError,
+    assemble_spec,
+    check_completeness,
+    mapping_payload,
+)
 from mapping.risks import spec_risks
 from specs.model import MappingSpec, SpecStatus
 
@@ -234,3 +239,48 @@ def test_merged_register_stays_severity_ranked():
         Severity.MEDIUM,
         Severity.LOW,
     ]
+
+
+# --- proposer completeness (RC1-567) -----------------------------------------
+
+
+# The fixture-generated spec (the worked EXAMPLE is a hand-written
+# illustration and deliberately diverges from the fixture).
+GENERATED = Path(__file__).parent.parent / "specs/approved/mailchimp_to_listmonk.yaml"
+
+
+def test_generated_spec_covers_the_inventory_exactly(bundle):
+    payload = mapping_payload(bundle, build_inventory(bundle), "listmonk")
+    check_completeness(load_spec(GENERATED), payload)  # must not raise
+
+
+def test_dropped_field_mapping_is_refused(bundle):
+    payload = mapping_payload(bundle, build_inventory(bundle), "listmonk")
+    spec = load_spec(GENERATED)
+    incomplete = spec.model_copy(update={"field_mappings": spec.field_mappings[1:]})
+    dropped = spec.field_mappings[0].source_field
+    with pytest.raises(ProposalError, match=f"field\\(s\\) missing: {dropped}"):
+        check_completeness(incomplete, payload)
+
+
+def test_invented_segment_is_refused(bundle):
+    payload = mapping_payload(bundle, build_inventory(bundle), "listmonk")
+    spec = load_spec(GENERATED)
+    ghost = spec.segment_mappings[0].model_copy(
+        update={"source_segment": "Segment the export never had"}
+    )
+    hallucinated = spec.model_copy(
+        update={"segment_mappings": [*spec.segment_mappings, ghost]}
+    )
+    with pytest.raises(ProposalError, match="not in the inventory"):
+        check_completeness(hallucinated, payload)
+
+
+def test_duplicated_consent_mapping_is_refused(bundle):
+    payload = mapping_payload(bundle, build_inventory(bundle), "listmonk")
+    spec = load_spec(GENERATED)
+    doubled = spec.model_copy(
+        update={"consent_mappings": [*spec.consent_mappings, spec.consent_mappings[0]]}
+    )
+    with pytest.raises(ProposalError, match="duplicated"):
+        check_completeness(doubled, payload)
