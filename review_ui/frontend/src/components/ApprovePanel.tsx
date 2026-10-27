@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ApiError, type ApproveResult } from '../api'
+import GateRefusal from './GateRefusal'
 import SignInDialog from './SignInDialog'
 import './ApprovePanel.css'
 
@@ -74,11 +75,7 @@ export default function ApprovePanel({ openQuestions, onApprove, onLogin }: Appr
           refuse until every mapping is resolved.
         </p>
       )}
-      {error && (
-        <p className="ap-error" role="alert">
-          {error}
-        </p>
-      )}
+      {error && <GateRefusal detail={error} />}
       {dialogMessage && (
         <SignInDialog
           message={dialogMessage}
