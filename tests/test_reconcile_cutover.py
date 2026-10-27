@@ -11,7 +11,7 @@ from executor.cutover import render_cutover_plan
 from executor.engine import execute
 from executor.plan import build_plan
 from executor.queries import QueryNotEvaluatable, evaluate_query
-from executor.reconcile import reconcile, render_markdown
+from executor.reconcile import SegmentCheck, reconcile, render_markdown
 from executor.target import TargetError
 from ingest.mailchimp import load_bundle
 from mapping.gate import load_approved
@@ -133,3 +133,46 @@ def test_reconcile_refuses_a_missing_list(bundle, spec):
     with pytest.raises(TargetError, match="nothing to reconcile"):
         reconcile(bundle, spec, target)
     assert target.lists == {}
+
+
+# --- RC1-565: unverified is not a pass; full membership comparison -------------
+
+
+def test_unevaluable_segment_check_is_not_a_pass():
+    check = SegmentCheck(
+        name="x", query="weird_fn(y)", target_count=3, plan_count=None, source_count=3
+    )
+    assert not check.verified
+    assert not check.ok
+
+
+def test_unverified_segment_fails_and_renders_unverified(bundle, spec, migrated):
+    report = reconcile(bundle, spec, migrated)
+    report.segments[0] = SegmentCheck(
+        name=report.segments[0].name,
+        query=report.segments[0].query,
+        target_count=report.segments[0].target_count,
+        plan_count=None,
+        source_count=report.segments[0].source_count,
+    )
+    assert not report.passed
+    markdown = render_markdown(report)
+    assert "UNVERIFIED" in markdown
+    assert "**FAIL**" in markdown
+
+
+def test_membership_catches_offsetting_errors(bundle, spec, migrated):
+    # Swap one planned address for a stranger with the same consent state:
+    # every aggregate count still matches; only the full set comparison sees it.
+    email, sub = next(iter(migrated.subscribers.items()))
+    migrated.subscribers["ghost@nowhere.example"] = sub.model_copy(
+        update={"email": "ghost@nowhere.example"}
+    )
+    del migrated.subscribers[email]
+    report = reconcile(bundle, spec, migrated)
+    assert not report.passed
+    assert email in report.membership.missing
+    assert report.membership.unexpected == ["ghost@nowhere.example"]
+    assert all(c.ok for c in report.consent_counts)  # the masking this catches
+    assert "UNEXPECTED: ghost@nowhere.example" in render_markdown(report)
+
