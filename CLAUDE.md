@@ -60,7 +60,11 @@ proposes, deterministic Python validates, a human approves.
   reconciliation (100%, enumerated). Dry-run is the default
   (`python -m executor.run --spec ...`); writes need --execute. The spec is
   canonical: platform differences live in adapters, translated on write and
-  reversed on read. Integration tests (`pytest -m integration`) read env
+  reversed on read. Adapter HTTP goes through `executor/retries.py`
+  (ADR-0015): bounded retries for provably-unprocessed failures, read-back
+  before replaying an ambiguous write, fatal statuses raise immediately -
+  never blanket-retry a non-idempotent write. Integration tests
+  (`pytest -m integration`) read env
   from the process only, never .env; listmonk e2e runs in CI, brevo is a
   manual demo asset.
 - `scripts/demo.sh` + `docs/demo.md` - the recorded two-minute demo arc.

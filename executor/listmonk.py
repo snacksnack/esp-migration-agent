@@ -13,10 +13,14 @@ network path.
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
+
 import httpx
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from executor.plan import DesiredSubscriber, PlannedCampaign
+from executor.retries import IDEMPOTENT_METHODS, Recovered, call_with_retries
 from executor.target import TargetError, TargetSubscriber
 
 PAGE_SIZE = 1000
@@ -45,21 +49,45 @@ def client_from_settings(settings: ListmonkSettings) -> ListmonkClient:
 
 
 class ListmonkClient:
-    def __init__(self, url: str, username: str, password: str):
+    def __init__(
+        self,
+        url: str,
+        username: str,
+        password: str,
+        *,
+        transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
+        # transport/sleep are injection points for the no-network failure
+        # matrix (RC1-570): httpx.MockTransport in, recorded backoffs out.
         self._http = httpx.Client(
             base_url=url.rstrip("/") + "/api",
             auth=(username, password),
             timeout=60,
+            transport=transport,
         )
+        self._sleep = sleep
 
-    def _call(self, method: str, path: str, what: str, **kwargs) -> dict | list:
-        try:
-            resp = self._http.request(method, path, **kwargs)
-        except httpx.HTTPError as exc:
-            raise TargetError(f"{what}: connection error: {exc}") from exc
-        if resp.status_code >= 400:
-            raise TargetError(f"{what}: HTTP {resp.status_code} {resp.text[:300]}")
-        return resp.json().get("data")
+    def _call(
+        self,
+        method: str,
+        path: str,
+        what: str,
+        recover: Callable[[], dict | None] | None = None,
+        **kwargs,
+    ) -> dict | list:
+        result = call_with_retries(
+            lambda: self._http.request(method, path, **kwargs),
+            what=what,
+            replay_safe=method in IDEMPOTENT_METHODS,
+            recover=recover,
+            sleep=self._sleep,
+        )
+        if isinstance(result, Recovered):
+            return result.data
+        if result.status_code >= 400:
+            raise TargetError(f"{what}: HTTP {result.status_code} {result.text[:300]}")
+        return result.json().get("data")
 
     # --- lists ---------------------------------------------------------------
 
@@ -71,6 +99,10 @@ class ListmonkClient:
                 return row["id"]
         return None
 
+    def _recover_list(self, name: str) -> dict | None:
+        found = self.find_list(name)
+        return None if found is None else {"id": found}
+
     def ensure_list(self, name: str) -> int:
         found = self.find_list(name)
         if found is not None:
@@ -79,6 +111,7 @@ class ListmonkClient:
             "POST",
             "/lists",
             f"create list {name!r}",
+            recover=lambda: self._recover_list(name),
             json={"name": name, "type": "private", "optin": "double"},
         )
         return created["id"]
@@ -133,11 +166,28 @@ class ListmonkClient:
             "preconfirm_subscriptions": desired.subscription == "confirmed",
         }
 
+    def _recover_subscriber(self, email: str) -> dict | None:
+        """Read-back for an ambiguous create: did the subscriber land?"""
+        quoted = email.replace("'", "''")
+        data = self._call(
+            "GET",
+            "/subscribers",
+            f"look up subscriber {email}",
+            params={
+                "query": f"subscribers.email = '{quoted}'",
+                "page": 1,
+                "per_page": 1,
+            },
+        )
+        rows = data["results"]
+        return rows[0] if rows else None
+
     def create_subscriber(self, desired: DesiredSubscriber, list_id: int) -> None:
         created = self._call(
             "POST",
             "/subscribers",
             f"create subscriber {desired.email}",
+            recover=lambda: self._recover_subscriber(desired.email),
             json=self._subscriber_body(desired, list_id),
         )
         if desired.subscription == "unsubscribed" and desired.status != "blocklisted":
@@ -190,11 +240,16 @@ class ListmonkClient:
             )
         return out
 
+    def _find_campaign_row(self, name: str) -> dict | None:
+        data = self._call("GET", "/campaigns", "list campaigns", params={"per_page": "all"})
+        return next((r for r in data["results"] if r["name"] == name), None)
+
     def create_campaign(self, campaign: PlannedCampaign, list_id: int) -> None:
         self._call(
             "POST",
             "/campaigns",
             f"create campaign {campaign.name!r}",
+            recover=lambda: self._find_campaign_row(campaign.name),
             json={
                 "name": campaign.name,
                 "subject": campaign.subject,
@@ -206,8 +261,7 @@ class ListmonkClient:
         )
 
     def update_campaign(self, name: str, campaign: PlannedCampaign, list_id: int) -> None:
-        data = self._call("GET", "/campaigns", "list campaigns", params={"per_page": "all"})
-        row = next((r for r in data["results"] if r["name"] == name), None)
+        row = self._find_campaign_row(name)
         if row is None:
             raise TargetError(f"campaign {name!r} vanished between diff and write")
         self._call(
