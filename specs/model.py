@@ -114,16 +114,25 @@ class Approval(BaseModel):
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+# Optional provenance fields the approval binds when present; unset fields
+# are omitted from hashing and YAML so older signed specs stay valid.
+PROVENANCE_FIELDS = ("source_fingerprint", "source_timezone")
+
+
 class MappingSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     spec_version: Literal[1] = 1
     source: str
     target: str
-    # sha256 of the export files the proposal was built from (RC1-566): the
-    # approval's content hash covers it, so a signed spec only runs against
-    # the exact bundle that was reviewed. None on pre-RC1-566 specs.
+    # Source provenance the approval binds (RC1-566/RC1-569): sha256 of the
+    # export files the proposal was built from, and the account timezone the
+    # export was parsed with (timestamps are tz-localized before converting
+    # to UTC, so a different tz yields different target values from the same
+    # files). The approval's content hash covers both, so a signed spec only
+    # runs against the exact inputs that were reviewed. None on older specs.
     source_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    source_timezone: str | None = Field(default=None, min_length=1)
     generated_at: datetime
     status: SpecStatus = SpecStatus.DRAFT
     field_mappings: list[FieldMapping] = []
@@ -156,13 +165,16 @@ class MappingSpec(BaseModel):
     def open_questions(self) -> list[str]:
         return [m.open_question for m in self.reviewed_mappings() if m.open_question]
 
+    def _unset_provenance(self) -> set[str]:
+        """Provenance fields that are unset are absent, not null, from hashing
+        and YAML, so specs written before each field existed keep their
+        content hash (RC1-566/RC1-569)."""
+        return {f for f in PROVENANCE_FIELDS if getattr(self, f) is None}
+
     def content_sha256(self) -> str:
         """Hash of the reviewed content (everything except the approval block),
         pinned into Approval so the executor runs exactly what was signed off."""
-        exclude = {"approval"}
-        if self.source_fingerprint is None:
-            # Pre-RC1-566 specs carry no fingerprint; keep their hash stable.
-            exclude.add("source_fingerprint")
+        exclude = {"approval"} | self._unset_provenance()
         return hash_content(self.model_dump(mode="json", exclude=exclude))
 
     @classmethod
@@ -170,7 +182,7 @@ class MappingSpec(BaseModel):
         return cls.model_validate(yaml.safe_load(text))
 
     def to_yaml(self) -> str:
-        exclude = {"source_fingerprint"} if self.source_fingerprint is None else None
         return yaml.safe_dump(
-            self.model_dump(mode="json", exclude=exclude), sort_keys=False
+            self.model_dump(mode="json", exclude=self._unset_provenance() or None),
+            sort_keys=False,
         )

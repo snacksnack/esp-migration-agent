@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from executor import run as run_module
-from ingest.mailchimp import bundle_fingerprint
+from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, bundle_fingerprint
 from mapping.gate import GateError, load_approved, verify_source
 from tests.fake_target import FakeTarget
 
@@ -39,8 +39,10 @@ def test_pre_rc1_566_spec_still_loads_and_passes_with_a_note(capsys):
     # be unchanged by the new field, and verify_source lets it through loudly.
     spec = load_approved(APPROVED)
     assert spec.source_fingerprint is None
-    verify_source(spec, AUDIENCE, SUPPLEMENT)
-    assert "not verified" in capsys.readouterr().err
+    verify_source(spec, AUDIENCE, SUPPLEMENT, DEFAULT_ACCOUNT_TZ)
+    err = capsys.readouterr().err
+    assert "bundle identity is not verified" in err
+    assert "parse settings are not verified" in err  # RC1-569
     assert "source_fingerprint" not in spec.to_yaml()
 
 
@@ -59,14 +61,14 @@ def test_verify_source_refuses_a_different_bundle():
         update={"source_fingerprint": "0" * 64}
     )
     with pytest.raises(GateError, match="does not match the approved spec"):
-        verify_source(spec, AUDIENCE, SUPPLEMENT)
+        verify_source(spec, AUDIENCE, SUPPLEMENT, DEFAULT_ACCOUNT_TZ)
 
 
 def test_verify_source_accepts_the_reviewed_bundle():
     spec = load_approved(APPROVED).model_copy(
         update={"source_fingerprint": bundle_fingerprint(AUDIENCE, SUPPLEMENT)}
     )
-    verify_source(spec, AUDIENCE, SUPPLEMENT)  # must not raise
+    verify_source(spec, AUDIENCE, SUPPLEMENT, DEFAULT_ACCOUNT_TZ)  # must not raise
 
 
 def test_cli_refuses_a_target_mismatch(monkeypatch, capsys):
@@ -80,3 +82,34 @@ def test_cli_refuses_a_target_mismatch(monkeypatch, capsys):
     assert run_module.main() == 1
     assert "does not match the approved spec's target" in capsys.readouterr().err
     assert fake.lists == {}
+
+
+# --- RC1-569: the approval binds the parse timezone too ------------------------
+
+
+def _stamped():
+    return load_approved(APPROVED).model_copy(
+        update={
+            "source_fingerprint": bundle_fingerprint(AUDIENCE, SUPPLEMENT),
+            "source_timezone": DEFAULT_ACCOUNT_TZ,
+        }
+    )
+
+
+def test_timezone_mismatch_is_refused():
+    with pytest.raises(GateError, match="does not match the timezone"):
+        verify_source(_stamped(), AUDIENCE, SUPPLEMENT, "UTC")
+
+
+def test_timezone_match_passes_silently(capsys):
+    verify_source(_stamped(), AUDIENCE, SUPPLEMENT, DEFAULT_ACCOUNT_TZ)
+    assert capsys.readouterr().err == ""
+
+
+def test_timezone_is_bound_by_the_content_hash():
+    spec = load_approved(APPROVED)
+    stamped = spec.model_copy(update={"source_timezone": DEFAULT_ACCOUNT_TZ})
+    assert stamped.content_sha256() != spec.content_sha256()
+    assert "source_timezone" not in spec.to_yaml()
+    reparsed = type(spec).from_yaml(stamped.to_yaml())
+    assert reparsed.source_timezone == DEFAULT_ACCOUNT_TZ
