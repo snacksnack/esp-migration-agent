@@ -16,15 +16,27 @@ No real subscriber data exists anywhere in this repository.
   segment logic is pulled over the API during discovery. The account owner's
   `reply_to` is masked to `owner@redacted.invalid` so nothing real is
   committed.
-- Account-level export (Settings > Manage > Export account data) - PENDING:
-  Mailchimp allows one export per 24h and the audience export used today's
-  slot. Lands under `mailchimp_export/account/` tomorrow.
+- `mailchimp_export/account/` - CAPTURED 2026-10-26 (Settings > Manage >
+  Export account data; UI-only, one export per 24h). Lists mirror the
+  audience export exactly: members 3,756 / transactional 88 / unsubscribed
+  411 / cleaned 0, plus the three draft campaigns' content and both
+  templates. `appointments.csv`, `events.csv` and `campaigns.csv` are
+  headers-only on this account (no bookings, no tracked events, and
+  campaigns.csv lists only sent campaigns - drafts appear solely under
+  `campaigns_content/`).
+- **OPTIN_IP is masked** across both export captures: Mailchimp recorded the
+  seeding machine's real IP on every API-created member, so it is replaced
+  with `203.0.113.35` (TEST-NET-3, same shape, parses identically) - the
+  same posture as the masked `reply_to` in `api_supplement/`.
 
 ## Findings baked into the fixture (discovery-stage material)
 
 - **Mailchimp's audience export silently omits pending members.** 4,499
   members are in the account; the CSVs carry 4,255. The 244 members with
-  status `pending` appear in no CSV. A genuine source-platform risk for the
+  status `pending` appear in no CSV. **The account-level export omits them
+  too** (verified 2026-10-26): pending members survive no export path at
+  all, which upgrades the risk from "use the right export" to "unconfirmed
+  signups cannot leave Mailchimp as data." A genuine source-platform risk for the
   risk register: unconfirmed signups do not survive a CSV-export migration.
 - **MEMBER_RATING is uniformly 2** (Mailchimp's default) across all 4,255
   exported rows - the account never sent anything, so no engagement signal
