@@ -80,6 +80,18 @@ def main() -> int:
             f"\nexecuted into list {summary.list_id}: {writes or 'nothing'} "
             f"({summary.skipped_unchanged:,} already converged)"
         )
+        if summary.conflicts:
+            shown = ", ".join(summary.conflicts[:5])
+            more = (
+                f" and {len(summary.conflicts) - 5:,} more"
+                if len(summary.conflicts) > 5
+                else ""
+            )
+            print(
+                f"kept the destination's stricter consent for "
+                f"{len(summary.conflicts):,} address(es): {shown}{more} "
+                "(ADR-0013: protection is never downgraded)"
+            )
         return 0
     except (GateError, PlanError, TargetError) as exc:
         print(f"error: {exc}", file=sys.stderr)

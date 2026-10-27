@@ -95,6 +95,17 @@ SOURCE_FIELD_READERS: dict[str, Callable[[SubscriberRecord], str | int | None]] 
 }
 
 
+def target_state_subscribable(target: str, status: str, subscription: str) -> bool:
+    """Whether an EXISTING target state could receive marketing mail, by the
+    same dialect table the plan writes with. Unknown states count as
+    subscribable (unprotected): only a state the dialect knows is protected
+    may veto a write (RC1-568)."""
+    for state in CONSENT_DIALECTS.get(target, {}).values():
+        if (state.status, state.subscription) == (status, subscription):
+            return state.subscribable
+    return True
+
+
 # --- plan models -------------------------------------------------------------
 
 class DesiredSubscriber(BaseModel):
