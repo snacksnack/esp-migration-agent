@@ -4,10 +4,12 @@ all against the committed fixture and the in-memory fake target."""
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
+from executor import run as run_module
 from executor.engine import compute_diff, execute, render_diff
 from executor.plan import (
     PlanError,
@@ -173,3 +175,20 @@ def test_partial_migration_converges_without_duplicates(plan):
     assert len(target.subscribers) == 4255  # no duplicates, fully converged
     diff = compute_diff(plan, target.current_subscribers(0), target.current_campaigns())
     assert not diff.writes
+
+
+# --- dry run is strictly read-only (RC1-564) -----------------------------------
+
+
+def test_dry_run_never_creates_the_list(monkeypatch, capsys):
+    fake = FakeTarget()
+    monkeypatch.setattr(
+        run_module, "client_for_target", lambda target, need_writes: fake
+    )
+    monkeypatch.setattr(sys, "argv", ["executor.run", "--spec", str(APPROVED)])
+    assert run_module.main() == 0
+    assert fake.lists == {}
+    assert fake.write_calls == 0
+    out = capsys.readouterr().out
+    assert "--execute would create it" in out
+    assert "dry run only" in out

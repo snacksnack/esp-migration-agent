@@ -18,6 +18,9 @@ class FakeTarget:
         self.write_calls = 0
         self._next_id = 1
 
+    def find_list(self, name: str) -> int | None:
+        return self.lists.get(name)
+
     def ensure_list(self, name: str) -> int:
         if name not in self.lists:
             self.lists[name] = len(self.lists) + 1

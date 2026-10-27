@@ -30,8 +30,13 @@ class TargetError(RuntimeError):
 
 
 class TargetClient(Protocol):
+    def find_list(self, name: str) -> int | None:
+        """Find the list WITHOUT creating it; None when absent. The only
+        list lookup read paths (dry run, reconcile) may use (RC1-564)."""
+        ...
+
     def ensure_list(self, name: str) -> int:
-        """Find or create the list; returns its id."""
+        """Find or create the list; returns its id. Write paths only."""
         ...
 
     def current_subscribers(self, list_id: int) -> dict[str, TargetSubscriber]:
@@ -60,6 +65,9 @@ class TargetClient(Protocol):
 class OfflineTarget:
     """Stand-in when no target is configured: reports an empty target so the
     dry-run diff renders offline, and refuses every write loudly."""
+
+    def find_list(self, name: str) -> int | None:
+        return None
 
     def ensure_list(self, name: str) -> int:
         return 0

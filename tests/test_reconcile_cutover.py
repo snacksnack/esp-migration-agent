@@ -12,6 +12,7 @@ from executor.engine import execute
 from executor.plan import build_plan
 from executor.queries import QueryNotEvaluatable, evaluate_query
 from executor.reconcile import reconcile, render_markdown
+from executor.target import TargetError
 from ingest.mailchimp import load_bundle
 from mapping.gate import load_approved
 from tests.fake_target import FakeTarget
@@ -124,3 +125,11 @@ def test_cutover_plan_renders_required_sections(bundle, spec):
     assert "411" in text  # counts trace to the plan
     assert "3,844" in text
     assert spec.approval.approved_by in text
+
+
+def test_reconcile_refuses_a_missing_list(bundle, spec):
+    # Reconciliation reads; it must not create the list it is checking.
+    target = FakeTarget()
+    with pytest.raises(TargetError, match="nothing to reconcile"):
+        reconcile(bundle, spec, target)
+    assert target.lists == {}
