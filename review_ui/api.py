@@ -12,10 +12,10 @@ through MappingSpec validation and rewrites the file, so the schema's
 flag-don't-guess and approval invariants hold for UI edits exactly as they do
 for hand edits. Approval is mapping.gate.approve with the named owner - a
 refusal (open questions remain) returns 409 carrying the gate's own message,
-and it is public: reading and resolving need no login (RC1-562). The one
-protected act is a successful sign-off - approve checks the session cookie
-only after the gate passes, so visitors watch every gate work and nobody
-anonymous can sign the migration.
+and it is public - the gate speaks before identity matters (RC1-562). Writes
+are the approver's alone: resolving and a successful sign-off answer 401
+without the session cookie, with a message that says why, and nothing ever
+changes on disk for an anonymous visitor.
 """
 
 from __future__ import annotations
@@ -96,9 +96,17 @@ def create_app(
     app = FastAPI(title="ESP migration review gate", docs_url=None, redoc_url=None)
     report_cache: list[DiscoveryReport] = []  # built once; the bundle never changes mid-session
 
-    # No blanket gate (RC1-562): reading and resolving are public - the demo
-    # is ephemeral and resets on restart - and the ONE protected act is a
-    # successful sign-off, checked inside approve_spec after the gate passes.
+    # No blanket middleware (RC1-562): reading is public, and the approve
+    # endpoint runs the gate BEFORE checking identity so its refusal is
+    # public too. Writes - resolving and a successful sign-off - require the
+    # approver cookie; anonymous visitors toggle everything in the UI but
+    # nothing ever changes on disk.
+
+    def require_approver(request: Request, detail: str) -> None:
+        if settings.auth_enabled and not auth.token_valid(
+            settings, request.cookies.get(auth.COOKIE_NAME)
+        ):
+            raise HTTPException(status_code=401, detail=detail)
 
     @app.get("/healthz")
     def healthz() -> dict:
@@ -131,7 +139,12 @@ def create_app(
         return {"path": str(spec_path), "spec": _load(spec_path).model_dump(mode="json")}
 
     @app.patch("/api/mappings/{kind}/{index}")
-    def resolve_mapping(kind: str, index: int, body: ResolveRequest) -> dict:
+    def resolve_mapping(kind: str, index: int, body: ResolveRequest, request: Request) -> dict:
+        require_approver(
+            request,
+            "This is a live demo: anyone can review, but saving a change to the "
+            "migration spec needs the approver sign-in.",
+        )
         if kind not in MAPPING_KINDS:
             raise HTTPException(status_code=404, detail=f"unknown mapping kind {kind!r}")
         list_attr, source_attr = MAPPING_KINDS[kind]
@@ -177,13 +190,9 @@ def create_app(
         # Identity is checked only once the gate would pass: the refusal above
         # is the demo's centerpiece and stays public, and nothing has been
         # written yet, so this 401 signs off on nothing (RC1-562).
-        if settings.auth_enabled and not auth.token_valid(
-            settings, request.cookies.get(auth.COOKIE_NAME)
-        ):
-            raise HTTPException(
-                status_code=401,
-                detail="every gate passes - but signing off needs the approver login",
-            )
+        require_approver(
+            request, "every gate passes - but signing off needs the approver sign-in"
+        )
         count("gate_approval", tags={"outcome": "approved"})
         out = approved_dir / spec_path.name
         out.parent.mkdir(parents=True, exist_ok=True)
