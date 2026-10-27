@@ -257,7 +257,56 @@ def response_text(response) -> str:
     return text
 
 
+def _normalize_tag(tag: str) -> str:
+    return tag.strip("*|")
+
+
+def check_completeness(spec: MappingSpec, payload: dict) -> None:
+    """Deterministic coverage check (RC1-567): everything the payload showed
+    the model must come back exactly once - proposed or flagged, never
+    silently dropped, invented, or doubled. Consent buckets get a second net
+    at plan build; fields, segments, and merge tags have no later net, so a
+    miss must be refused here."""
+    expected_to_got = {
+        "field": (
+            [f["source_field"] for f in payload["fields"]],
+            [m.source_field for m in spec.field_mappings],
+        ),
+        "segment": (
+            [s["name"] for s in payload["segments"]],
+            [m.source_segment for m in spec.segment_mappings],
+        ),
+        "merge tag": (
+            [_normalize_tag(t) for t in payload["merge_tags_in_use"]],
+            [_normalize_tag(m.source_tag) for m in spec.merge_tag_mappings],
+        ),
+        "consent bucket": (
+            list(payload["consent_buckets"]["observed"]),
+            [m.source_status for m in spec.consent_mappings],
+        ),
+    }
+    problems = []
+    for kind, (expected, got) in expected_to_got.items():
+        missing = sorted(set(expected) - set(got))
+        invented = sorted(set(got) - set(expected))
+        doubled = sorted({g for g in got if got.count(g) > 1})
+        if missing:
+            problems.append(f"{kind}(s) missing: {', '.join(missing)}")
+        if invented:
+            problems.append(f"{kind}(s) not in the inventory: {', '.join(invented)}")
+        if doubled:
+            problems.append(f"{kind}(s) duplicated: {', '.join(doubled)}")
+    if problems:
+        raise ProposalError(
+            "proposal does not cover the inventory exactly: " + "; ".join(problems)
+        )
+
+
 def propose(bundle: MailchimpBundle, inventory: Inventory, target: str) -> MappingSpec:
     payload = mapping_payload(bundle, inventory, target)
     response = request_mapping(payload)
-    return assemble_spec(_parse_json(response_text(response)), source="mailchimp", target=target)
+    spec = assemble_spec(
+        _parse_json(response_text(response)), source="mailchimp", target=target
+    )
+    check_completeness(spec, payload)
+    return spec
