@@ -22,6 +22,7 @@ from executor.plan import (
     MigrationPlan,
     PlannedCampaign,
     SuppressionViolationError,
+    target_state_subscribable,
 )
 from executor.target import TargetClient, TargetSubscriber
 
@@ -39,7 +40,7 @@ def subscriber_converged(existing: TargetSubscriber, desired: DesiredSubscriber)
 
 class DiffEntry(BaseModel):
     phase: str
-    action: str  # create | update | unchanged
+    action: str  # create | update | unchanged | conflict (kept, reported)
     key: str  # email or campaign name
 
 
@@ -54,16 +55,25 @@ class PlanDiff(BaseModel):
 
     @property
     def writes(self) -> list[DiffEntry]:
-        return [e for e in self.entries if e.action != "unchanged"]
+        return [e for e in self.entries if e.action in ("create", "update")]
 
 
 def _subscriber_action(
-    desired: DesiredSubscriber, current: dict[str, TargetSubscriber]
+    desired: DesiredSubscriber, current: dict[str, TargetSubscriber], target: str
 ) -> str:
     existing = current.get(desired.email.lower())
     if existing is None:
         return "create"
-    return "unchanged" if subscriber_converged(existing, desired) else "update"
+    if subscriber_converged(existing, desired):
+        return "unchanged"
+    if desired.subscribable and not target_state_subscribable(
+        target, existing.status, existing.subscription
+    ):
+        # The destination already protects this address more strictly than
+        # the plan wants it: never downgrade protection (ADR-0013). The
+        # record is kept as the target holds it and reported as a conflict.
+        return "conflict"
+    return "update"
 
 
 def _campaign_action(
@@ -84,7 +94,7 @@ def compute_diff(
     entries = [
         DiffEntry(
             phase="1-suppressions" if d.suppressed else "2-subscribers",
-            action=_subscriber_action(d, current_subscribers),
+            action=_subscriber_action(d, current_subscribers, plan.target),
             key=d.email,
         )
         for d in plan.all_subscribers
@@ -110,6 +120,13 @@ def render_diff(diff: PlanDiff, max_examples: int = 5) -> str:
             lines.append(f"    {e.action}  {e.key}")
         if len(examples) > max_examples:
             lines.append(f"    ... and {len(examples) - max_examples:,} more")
+    conflicts = [e for e in diff.entries if e.action == "conflict"]
+    if conflicts:
+        lines.append(
+            f"  {len(conflicts):,} conflict(s): the destination already holds "
+            "these addresses in a stricter consent state; the executor keeps "
+            "that state and never downgrades protection"
+        )
     if not diff.writes:
         lines.append("  target already converged: nothing to write")
     return "\n".join(lines)
@@ -119,6 +136,7 @@ class ExecutionSummary(BaseModel):
     list_id: int
     written: dict[str, int]  # action -> count, writes only
     skipped_unchanged: int
+    conflicts: list[str] = []  # kept at the destination's stricter consent
 
 
 def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
@@ -127,6 +145,7 @@ def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
     current = client.current_subscribers(list_id)
     written: Counter = Counter()
     skipped = 0
+    conflicts: list[str] = []
 
     # Phases 1 then 2, in the plan's structural order.
     for desired in plan.all_subscribers:
@@ -135,11 +154,14 @@ def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
                 f"write-time invariant check: {desired.email} is suppressed but "
                 "planned subscribable; aborting before the write"
             )
-        action = _subscriber_action(desired, current)
+        action = _subscriber_action(desired, current, plan.target)
         if action == "create":
             client.create_subscriber(desired, list_id)
         elif action == "update":
             client.update_subscriber(current[desired.email.lower()], desired, list_id)
+        elif action == "conflict":
+            conflicts.append(desired.email)
+            continue
         else:
             skipped += 1
             continue
@@ -157,4 +179,9 @@ def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
             continue
         written[action] += 1
 
-    return ExecutionSummary(list_id=list_id, written=dict(written), skipped_unchanged=skipped)
+    return ExecutionSummary(
+        list_id=list_id,
+        written=dict(written),
+        skipped_unchanged=skipped,
+        conflicts=conflicts,
+    )

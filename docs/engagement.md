@@ -73,6 +73,17 @@ The same executor ran first against a self-hosted Listmonk target behind
 the identical adapter protocol ([report](reconciliation_report.md)), which
 is how the engine rehearses before touching a customer's live target.
 
+What each line verified, precisely: segments are re-created as target-dialect
+queries and checked for COUNT parity against the plan (the same predicate
+evaluated locally over every planned record), not for pixel-identical segment
+UIs; campaign translation verifies zero residual source merge tags plus a
+render comparison with both sides substituted from the same sample values -
+no mail is sent. Suppressed addresses are enumerated one by one, never
+sampled. If the destination already held an address in a stricter consent
+state than the plan, the executor keeps the stricter state and lists the
+address as a conflict rather than downgrading protection (ADR-0013); this
+engagement migrated into a fresh list, so no conflicts arose.
+
 ## What the engagement cost to run
 
 Measured, not estimated, because every stage is traced: the LLM mapping

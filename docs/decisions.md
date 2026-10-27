@@ -3,6 +3,30 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0013: The executor never downgrades stricter destination consent (2026-10-27)
+
+**Decision.** RC1-568 (external review finding, GPT-6 Astra #6): the engine
+was spec-wins - a contact who unsubscribed AT THE DESTINATION after the
+export was taken would be "updated" right back to subscribable. Now, when
+the existing target state is non-subscribable (by the same consent-dialect
+table the plan writes with) and the plan wants the address subscribable,
+the executor keeps the target's state, skips the write, and reports the
+address as a conflict - in the dry-run diff, in the execution summary, and
+on the CLI. Protection moves in one direction only: a plan that SUPPRESSES
+an address always writes, a plan that would un-suppress one never does.
+Unknown target states count as unprotected; only a state the dialect knows
+is stricter may veto a write. Reconciliation stays strict on purpose: a
+conflicted address shows up as a counts/checksum mismatch, so a FAIL report
+plus the named conflict list is the artifact the humans resolve - the
+executor does not pretend the plan converged when it deliberately did not.
+
+**Deliverable boundary note (review finding #11).** The engagement doc now
+states explicitly what each acceptance line verified: segments are
+re-created as target queries and checked for count parity against the plan
+(predicates evaluated locally), not pixel-identical membership UIs; campaign
+translation verifies residual tags and a substituted render comparison, not
+actual sends.
+
 ## ADR-0012: The demo reads public; only a successful sign-off is gated (2026-10-27)
 
 **Decision.** RC1-562 amends ADR-0011's access model so the demo can be
