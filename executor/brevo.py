@@ -38,6 +38,7 @@ from executor.target import TargetError, TargetSubscriber
 
 BREVO_API = "https://api.brevo.com/v3"
 PAGE_SIZE = 500  # Brevo's max `limit` on the list-contacts endpoint
+LOOKUP_PAGE_SIZE = 50  # Brevo's max `limit` on the folders/lists endpoints
 CONSENT_ATTR = "ESP_CONSENT"
 FOLDER_NAME = "ESP migration"
 
@@ -180,22 +181,40 @@ class BrevoClient:
 
     # --- lists -----------------------------------------------------------------
 
+    def _lookup_pages(self, path: str, what: str, key: str):
+        """Every page of a folders/lists lookup (their max `limit` is 50;
+        a single first-page fetch would miss a 51st entry and create a
+        duplicate, RC1-564)."""
+        offset = 0
+        while True:
+            data = self._call(
+                "GET", path, what,
+                params={"limit": LOOKUP_PAGE_SIZE, "offset": offset},
+            )
+            rows = data.get(key) or []
+            yield from rows
+            offset += LOOKUP_PAGE_SIZE
+            if offset >= data.get("count", 0) or not rows:
+                return
+
     def _ensure_folder(self) -> int:
-        data = self._call("GET", "/contacts/folders", "list folders",
-                          params={"limit": 50, "offset": 0})
-        for row in data.get("folders") or []:
+        for row in self._lookup_pages("/contacts/folders", "list folders", "folders"):
             if row["name"] == FOLDER_NAME:
                 return row["id"]
         created = self._call("POST", "/contacts/folders", "create folder",
                              json={"name": FOLDER_NAME})
         return created["id"]
 
-    def ensure_list(self, name: str) -> int:
-        data = self._call("GET", "/contacts/lists", "list lists",
-                          params={"limit": 50, "offset": 0})
-        for row in data.get("lists") or []:
+    def find_list(self, name: str) -> int | None:
+        for row in self._lookup_pages("/contacts/lists", "list lists", "lists"):
             if row["name"] == name:
                 return row["id"]
+        return None
+
+    def ensure_list(self, name: str) -> int:
+        found = self.find_list(name)
+        if found is not None:
+            return found
         created = self._call(
             "POST",
             "/contacts/lists",
