@@ -5,7 +5,7 @@ is (profile), what will hurt (risk register), and what the engagement costs
 (proposal) - every number deterministic, with optional LLM narration on top.
 
 Usage:
-    uv run python -m discovery.report [--narrate] [--out report.md]
+    uv run python -m discovery.report [--narrate] [--out report.md] [--html report.html]
 
 Defaults point at the committed fixture so the pipeline demos offline.
 """
@@ -19,6 +19,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from discovery.html_report import render_html
 from discovery.inventory import Inventory, build_inventory
 from discovery.narrator import narrate
 from discovery.profile import AudienceProfile, build_profile
@@ -196,6 +197,12 @@ def main() -> int:
         help="mapping spec (RC1-545) whose open questions join the risk register",
     )
     parser.add_argument("--out", type=Path, default=None, help="write markdown here")
+    parser.add_argument(
+        "--html",
+        type=Path,
+        default=None,
+        help="also write the self-contained HTML render here (RC1-559)",
+    )
     args = parser.parse_args()
 
     as_of = datetime.strptime(args.as_of, "%Y-%m-%d").replace(tzinfo=UTC)
@@ -212,10 +219,13 @@ def main() -> int:
             with workflow("discovery.report"):
                 report.narration = narrate(report.profile, report.inventory, report.risks)
     markdown = render_markdown(report)
+    if args.html:
+        args.html.write_text(render_html(report))
+        print(f"wrote {args.html}")
     if args.out:
         args.out.write_text(markdown)
         print(f"wrote {args.out}")
-    else:
+    elif not args.html:
         print(markdown)
     return 0
 

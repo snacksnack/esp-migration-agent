@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Discovery report: mailchimp → listmonk</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb;
+  --ink: #0b0b0b; --ink-2: #52514e; --ink-muted: #898781;
+  --hairline: #e1e0d9; --baseline: #c3c2b7;
+  --bar: #2a78d6;
+  --border: rgba(11, 11, 11, 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19;
+    --ink: #f0efec; --ink-2: #c3c2b7; --ink-muted: #898781;
+    --hairline: #2c2c2a; --baseline: #383835;
+    --bar: #3987e5;
+    --border: rgba(255, 255, 255, 0.1);
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 880px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 1.5rem; margin: 0 0 4px; }
+h2 { font-size: 1.05rem; margin: 40px 0 12px; }
+.subtitle, figcaption, .note { color: var(--ink-2); font-size: 0.85rem; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px; margin-top: 24px; }
+.tile { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px; }
+.tile .label { color: var(--ink-2); font-size: 0.78rem; }
+.tile .value { font-size: 1.5rem; font-weight: 600; }
+figure { margin: 16px 0 0; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+figure h3 { font-size: 0.9rem; margin: 0 0 12px; }
+.row { display: grid; grid-template-columns: 150px 1fr; align-items: center;
+  column-gap: 10px; margin: 6px 0; }
+.row .cat { color: var(--ink-2); font-size: 0.8rem; text-align: right;
+  overflow-wrap: anywhere; }
+.row .track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.row .fill { height: 18px; background: var(--bar);
+  border-radius: 0 4px 4px 0; flex: none; }
+.row .val { color: var(--ink-2); font-size: 0.8rem; white-space: nowrap;
+  font-variant-numeric: tabular-nums; }
+details { margin-top: 10px; }
+details summary { color: var(--ink-muted); font-size: 0.78rem; cursor: pointer; }
+table { border-collapse: collapse; width: 100%; margin-top: 8px;
+  font-size: 0.85rem; }
+th { text-align: left; color: var(--ink-2); font-weight: 600; }
+th, td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--hairline); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.sev { white-space: nowrap; }
+.sev .glyph { font-size: 0.7rem; margin-right: 4px; }
+ul { margin: 8px 0; padding-left: 20px; }
+.prose { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px; margin-top: 16px; }
+@media (max-width: 520px) { .row { grid-template-columns: 96px 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Discovery report: mailchimp → listmonk</h1>
+<p class="subtitle">Audience data as of 2026-10-24. Every
+count is computed deterministically from the export bundle; aggregates only, no
+record-level data appears in this report.</p>
+<div class="tiles"><div class="tile"><div class="label">Members in export</div><div class="value">4,255</div></div><div class="tile"><div class="label">Suppressions (migrate first)</div><div class="value">411</div></div><div class="tile"><div class="label">Segments</div><div class="value">4</div></div><div class="tile"><div class="label">Templates</div><div class="value">2</div></div><div class="tile"><div class="label">Risks on the register</div><div class="value">7</div></div><div class="tile"><div class="label">Estimated hours</div><div class="value">41.5</div></div></div>
+
+<h2>Audience profile</h2>
+<figure><h3>Consent mix</h3><div role="img" aria-label="Consent mix"><div class="row"><span class="cat">subscribed</span><span class="track"><span class="fill" style="width:100.0%" title="subscribed: 3,756"></span><span class="val">3,756</span></span></div><div class="row"><span class="cat">unsubscribed</span><span class="track"><span class="fill" style="width:10.9%" title="unsubscribed: 411"></span><span class="val">411</span></span></div><div class="row"><span class="cat">nonsubscribed</span><span class="track"><span class="fill" style="width:2.3%" title="nonsubscribed: 88"></span><span class="val">88</span></span></div></div><details><summary>Table view</summary><table><tr><th>Status</th><th class='num'>Members</th></tr><tr><td>subscribed</td><td class='num'>3,756</td></tr><tr><td>unsubscribed</td><td class='num'>411</td></tr><tr><td>nonsubscribed</td><td class='num'>88</td></tr></table></details></figure><figure><h3>Consumer vs corporate domains</h3><div role="img" aria-label="Consumer vs corporate domains"><div class="row"><span class="cat">consumer</span><span class="track"><span class="fill" style="width:100.0%" title="consumer: 2,830"></span><span class="val">2,830</span></span></div><div class="row"><span class="cat">corporate</span><span class="track"><span class="fill" style="width:50.4%" title="corporate: 1,425"></span><span class="val">1,425</span></span></div></div><details><summary>Table view</summary><table><tr><th>Class</th><th class='num'>Members</th></tr><tr><td>consumer</td><td class='num'>2,830</td></tr><tr><td>corporate</td><td class='num'>1,425</td></tr></table></details></figure><figure><h3>Top email domains</h3><div role="img" aria-label="Top email domains"><div class="row"><span class="cat">gmail.com</span><span class="track"><span class="fill" style="width:100.0%" title="gmail.com: 1,784"></span><span class="val">1,784</span></span></div><div class="row"><span class="cat">yahoo.com</span><span class="track"><span class="fill" style="width:35.8%" title="yahoo.com: 639"></span><span class="val">639</span></span></div><div class="row"><span class="cat">hotmail.com</span><span class="track"><span class="fill" style="width:13.7%" title="hotmail.com: 244"></span><span class="val">244</span></span></div><div class="row"><span class="cat">outlook.com</span><span class="track"><span class="fill" style="width:9.1%" title="outlook.com: 163"></span><span class="val">163</span></span></div><div class="row"><span class="cat">williams.com</span><span class="track"><span class="fill" style="width:1.0%" title="williams.com: 17"></span><span class="val">17</span></span></div><div class="row"><span class="cat">smith.com</span><span class="track"><span class="fill" style="width:0.7%" title="smith.com: 13"></span><span class="val">13</span></span></div><div class="row"><span class="cat">rodriguez.com</span><span class="track"><span class="fill" style="width:0.6%" title="rodriguez.com: 11"></span><span class="val">11</span></span></div><div class="row"><span class="cat">anderson.com</span><span class="track"><span class="fill" style="width:0.5%" title="anderson.com: 9"></span><span class="val">9</span></span></div><div class="row"><span class="cat">johnson.com</span><span class="track"><span class="fill" style="width:0.4%" title="johnson.com: 8"></span><span class="val">8</span></span></div><div class="row"><span class="cat">davis.com</span><span class="track"><span class="fill" style="width:0.4%" title="davis.com: 7"></span><span class="val">7</span></span></div></div><details><summary>Table view</summary><table><tr><th>Domain</th><th class='num'>Members</th></tr><tr><td>gmail.com</td><td class='num'>1,784</td></tr><tr><td>yahoo.com</td><td class='num'>639</td></tr><tr><td>hotmail.com</td><td class='num'>244</td></tr><tr><td>outlook.com</td><td class='num'>163</td></tr><tr><td>williams.com</td><td class='num'>17</td></tr><tr><td>smith.com</td><td class='num'>13</td></tr><tr><td>rodriguez.com</td><td class='num'>11</td></tr><tr><td>anderson.com</td><td class='num'>9</td></tr><tr><td>johnson.com</td><td class='num'>8</td></tr><tr><td>davis.com</td><td class='num'>7</td></tr></table></details></figure><figure><h3>Geography (top 10 states)</h3><div role="img" aria-label="Geography (top 10 states)"><div class="row"><span class="cat">NY</span><span class="track"><span class="fill" style="width:100.0%" title="NY: 1,515"></span><span class="val">1,515</span></span></div><div class="row"><span class="cat">NJ</span><span class="track"><span class="fill" style="width:43.5%" title="NJ: 659"></span><span class="val">659</span></span></div><div class="row"><span class="cat">CA</span><span class="track"><span class="fill" style="width:33.6%" title="CA: 509"></span><span class="val">509</span></span></div><div class="row"><span class="cat">TX</span><span class="track"><span class="fill" style="width:22.2%" title="TX: 336"></span><span class="val">336</span></span></div><div class="row"><span class="cat">FL</span><span class="track"><span class="fill" style="width:18.7%" title="FL: 284"></span><span class="val">284</span></span></div><div class="row"><span class="cat">CO</span><span class="track"><span class="fill" style="width:2.0%" title="CO: 31"></span><span class="val">31</span></span></div><div class="row"><span class="cat">NE</span><span class="track"><span class="fill" style="width:1.6%" title="NE: 24"></span><span class="val">24</span></span></div><div class="row"><span class="cat">PA</span><span class="track"><span class="fill" style="width:1.6%" title="PA: 24"></span><span class="val">24</span></span></div><div class="row"><span class="cat">NC</span><span class="track"><span class="fill" style="width:1.5%" title="NC: 23"></span><span class="val">23</span></span></div><div class="row"><span class="cat">AS</span><span class="track"><span class="fill" style="width:1.5%" title="AS: 22"></span><span class="val">22</span></span></div></div><details><summary>Table view</summary><table><tr><th>State</th><th class='num'>Members</th></tr><tr><td>NY</td><td class='num'>1,515</td></tr><tr><td>NJ</td><td class='num'>659</td></tr><tr><td>CA</td><td class='num'>509</td></tr><tr><td>TX</td><td class='num'>336</td></tr><tr><td>FL</td><td class='num'>284</td></tr><tr><td>CO</td><td class='num'>31</td></tr><tr><td>NE</td><td class='num'>24</td></tr><tr><td>PA</td><td class='num'>24</td></tr><tr><td>NC</td><td class='num'>23</td></tr><tr><td>AS</td><td class='num'>22</td></tr></table></details></figure><figure><h3>Signup tenure</h3><div role="img" aria-label="Signup tenure"><div class="row"><span class="cat">Under 1 year</span><span class="track"><span class="fill" style="width:71.7%" title="Under 1 year: 1,254"></span><span class="val">1,254</span></span></div><div class="row"><span class="cat">1–3 years</span><span class="track"><span class="fill" style="width:100.0%" title="1–3 years: 1,748"></span><span class="val">1,748</span></span></div><div class="row"><span class="cat">3–7 years</span><span class="track"><span class="fill" style="width:58.8%" title="3–7 years: 1,028"></span><span class="val">1,028</span></span></div><div class="row"><span class="cat">Over 7 years</span><span class="track"><span class="fill" style="width:12.9%" title="Over 7 years: 225"></span><span class="val">225</span></span></div></div><details><summary>Table view</summary><table><tr><th>Cohort</th><th class='num'>Members</th></tr><tr><td>Under 1 year</td><td class='num'>1,254</td></tr><tr><td>1–3 years</td><td class='num'>1,748</td></tr><tr><td>3–7 years</td><td class='num'>1,028</td></tr><tr><td>Over 7 years</td><td class='num'>225</td></tr></table></details></figure><figure><h3>Engagement (member rating)</h3><div role="img" aria-label="Engagement (member rating)"><div class="row"><span class="cat">2 stars</span><span class="track"><span class="fill" style="width:100.0%" title="2 stars: 4,255"></span><span class="val">4,255</span></span></div></div><details><summary>Table view</summary><table><tr><th>Rating</th><th class='num'>Members</th></tr><tr><td>2 stars</td><td class='num'>4,255</td></tr></table></details></figure>
+<h2>Risk register</h2>
+<figure><table>
+<tr><th>Severity</th><th>Risk</th><th class="num">Affected</th><th>Detail</th></tr>
+<tr><td><span class="sev"><span class="glyph" style="color:#d03b3b">▲</span>high</span></td><td>Segment &#x27;Highly engaged (4-5 stars)&#x27; cannot be represented in listmonk</td><td class='num'>-</td><td>Condition type(s) MemberRating have no listmonk equivalent. Needs a human decision: rebuild from a proxy attribute, migrate as a static list, or drop.</td></tr><tr><td><span class="sev"><span class="glyph" style="color:#d03b3b">▲</span>high</span></td><td>Audience export omits pending (unconfirmed) members</td><td class='num'>-</td><td>Mailchimp audience exports carry no pending members, so a CSV-only migration silently drops unconfirmed signups. Reconcile exported row counts against the API list stats before cutover.</td></tr><tr><td><span class="sev"><span class="glyph" style="color:#ec835a">◆</span>medium</span></td><td>Malformed zip codes</td><td class='num'>67</td><td>Truncated (lost leading zero) or free-text values in &#x27;Zip code&#x27;. Geographic segments built on this field will mis-target.</td></tr><tr><td><span class="sev"><span class="glyph" style="color:#ec835a">◆</span>medium</span></td><td>Mixed formats in &#x27;Last purchase&#x27;</td><td class='num'>510</td><td>Non-ISO date formats and prose values. The field needs a parse-and-normalize rule (or an explicit decision to migrate as text).</td></tr><tr><td><span class="sev"><span class="glyph" style="color:#ec835a">◆</span>medium</span></td><td>Role addresses on the list</td><td class='num'>80</td><td>Shared inboxes (info@, postmaster@, ...) bounce and complain at elevated rates; review before the first send from the target.</td></tr><tr><td><span class="sev"><span class="glyph" style="color:#ec835a">◆</span>medium</span></td><td>Engagement distribution is degenerate</td><td class='num'>-</td><td>Every member has member_rating=2: the source account carries no usable engagement signal. Engagement-based segments are empty and a warm-up ramp cannot be cohorted on it.</td></tr><tr><td><span class="sev"><span class="glyph" style="color:#fab219">●</span>low</span></td><td>Members with no first name</td><td class='num'>195</td><td>Personalized templates (*|FNAME|*) render blank for these members; set a default greeting in the target.</td></tr>
+</table></figure>
+<h2>Scope and estimate proposal</h2>
+<figure><table>
+<tr><th>Workstream</th><th>Driver</th><th class="num">Units</th><th class="num">Est. hours</th></tr>
+<tr><td>Suppression migration (runs first, gating)</td><td>suppression_count</td><td class='num'>411</td><td class='num'>4</td></tr><tr><td>Subscriber and merge-field migration</td><td>members_total</td><td class='num'>4,255</td><td class='num'>9</td></tr><tr><td>Data cleanup (malformed merge-field values)</td><td>data_quality_risk_rows</td><td class='num'>657</td><td class='num'>7.5</td></tr><tr><td>Segment translation</td><td>segments</td><td class='num'>4</td><td class='num'>7</td></tr><tr><td>Template conversion (merge-tag translation)</td><td>templates</td><td class='num'>2</td><td class='num'>6</td></tr><tr><td>Validation and cutover</td><td>fixed</td><td class='num'>1</td><td class='num'>8</td></tr>
+<tr><td><strong>Total</strong></td><td></td><td></td>
+<td class="num"><strong>41.5</strong></td></tr>
+</table>
+<h3>Assumptions</h3><ul><li>Counts come from the export bundle as of the discovery date; deltas accumulated between export and cutover migrate in a final sync pass.</li><li>Pending (unconfirmed) members are absent from the export and are reconciled against API counts before cutover (see risk register).</li><li>No sent-campaign history migrates; the target starts with a clean sending reputation.</li><li>Estimates are planning anchors per the stated per-unit rates, to be reviewed with the customer.</li></ul>
+<h3>Out of scope</h3><ul><li>Automations and journeys (source account has none in the export; if present they are a separate engagement - RC1-545 stretch).</li><li>Historical campaign archive migration.</li><li>Deliverability warm-up execution on the target (a ramp recommendation is included in the discovery report).</li></ul>
+</figure>
+<h2>Send-ramp recommendation</h2>
+<div class="prose">The source account has no usable engagement signal (uniform member rating), so an engagement-cohort ramp cannot be derived from this export. Recommend ramping by signup recency instead (newest cohorts first) and tightening once the target accumulates its own opens.</div>
+</main>
+</body>
+</html>

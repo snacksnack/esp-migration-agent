@@ -70,6 +70,9 @@ Mailchimp; Listmonk and Brevo already sit behind the same `--target` flag.
 - `docs/playbook.md` - the FDE migration runbook, stage by stage
 - `docs/engagement.md` - the reference engagement written up as a real
   SOW + acceptance report, every figure traced to a committed artifact
+- `docs/discovery_report.html` - the discovery report as one self-contained
+  HTML file (audience-profile charts, risk register, proposal; RC1-559) -
+  the render an FDE sends the client; `--html` regenerates it
 - `docs/decisions.md` - ADRs, newest first
 
 ## Commands
@@ -78,7 +81,7 @@ Mailchimp; Listmonk and Brevo already sit behind the same `--target` flag.
 uv sync                                       # install
 uv run ruff check . && uv run pytest          # checks (same as CI)
 uv run python -m seeding.mailchimp_seeder --dry-run   # regenerate ground truth
-uv run python -m discovery.report [--narrate] [--spec SPEC.yaml]  # stage 2
+uv run python -m discovery.report [--narrate] [--spec SPEC.yaml] [--html report.html]  # stage 2
 uv run python -m mapping.review propose       # stage 3 (draft spec)
 uv run python -m mapping.review status SPEC.yaml      # stage 4 (review)
 uv run python -m mapping.review approve SPEC.yaml --by "Name"
