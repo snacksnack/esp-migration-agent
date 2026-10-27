@@ -3,11 +3,13 @@ The HTTP path is covered by the gated integration test, same as Listmonk."""
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from executor.brevo import (
     TAG_FROM_BREVO,
     TAG_TO_BREVO,
+    BrevoClient,
     attrib_from_brevo,
     attrib_to_brevo,
     body_from_brevo,
@@ -96,3 +98,23 @@ def test_unblacklisted_suppression_reports_actual_mailability():
 def test_unknown_label_falls_back_to_actual_flag():
     assert consent_from_brevo(None, blacklisted=True) == ("blocklisted", "unsubscribed")
     assert consent_from_brevo("garbage", blacklisted=False) == ("enabled", "confirmed")
+
+
+def test_list_lookup_paginates_past_the_first_page():
+    """A 51st list must still be found (and never duplicated): the lists
+    endpoint caps `limit` at 50, so the lookup walks every page (RC1-564).
+    MockTransport only - no network."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        offset = int(request.url.params["offset"])
+        rows = [
+            {"id": i, "name": f"L{i}"} for i in range(offset, min(offset + 50, 51))
+        ]
+        return httpx.Response(200, json={"lists": rows, "count": 51})
+
+    client = BrevoClient("test-key")
+    client._http = httpx.Client(
+        transport=httpx.MockTransport(handler), base_url="https://api.test"
+    )
+    assert client.find_list("L50") == 50
+    assert client.find_list("nope") is None

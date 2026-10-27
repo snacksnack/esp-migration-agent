@@ -56,12 +56,21 @@ def main() -> int:
             plan = build_plan(bundle, spec)
             client = client_for_target(args.target, need_writes=args.execute)
 
-            list_id = client.ensure_list(plan.list_name)
-            diff = compute_diff(
-                plan, client.current_subscribers(list_id), client.current_campaigns()
+            # A dry run must not write ANYTHING, the list included: look the
+            # list up read-only and diff against empty when it is absent
+            # (RC1-564). Only --execute may create it.
+            if args.execute:
+                list_id = client.ensure_list(plan.list_name)
+            else:
+                list_id = client.find_list(plan.list_name)
+            current = (
+                client.current_subscribers(list_id) if list_id is not None else {}
             )
+            diff = compute_diff(plan, current, client.current_campaigns())
             print(render_diff(diff))
             if not args.execute:
+                if list_id is None:
+                    print(f"\nlist {plan.list_name!r} does not exist; --execute would create it")
                 print("\ndry run only; pass --execute to write")
                 return 0
 

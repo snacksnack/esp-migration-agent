@@ -63,12 +63,18 @@ class ListmonkClient:
 
     # --- lists ---------------------------------------------------------------
 
-    def ensure_list(self, name: str) -> int:
+    def find_list(self, name: str) -> int | None:
         data = self._call("GET", "/lists", "list lists", params={"per_page": "all"})
         rows = data["results"] if isinstance(data, dict) else data
         for row in rows:
             if row["name"] == name:
                 return row["id"]
+        return None
+
+    def ensure_list(self, name: str) -> int:
+        found = self.find_list(name)
+        if found is not None:
+            return found
         created = self._call(
             "POST",
             "/lists",
