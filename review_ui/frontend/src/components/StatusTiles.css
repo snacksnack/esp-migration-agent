@@ -1,0 +1,19 @@
+.st {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.st-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.st-label {
+  color: var(--ink-2);
+  font-size: 0.78rem;
+}
+.st-value {
+  font-size: 1.5rem;
+  font-weight: 600;
+}

@@ -24,6 +24,12 @@ dev = [
 obs = [
     "ddtrace>=4.14,<5",
 ]
+# Review-gate UI backend (RC1-560). Optional like obs: the migration pipeline
+# and its tests never import it; only review_ui/ and its API tests do.
+ui = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
 # The shared eval harness (RC1-548), pinned by tag: if the ruler can move
 # under a run, a changed score no longer says whether the subject drifted or
 # the measurement did. v0.6.3 prices claude-opus-5-5 - the model both of this

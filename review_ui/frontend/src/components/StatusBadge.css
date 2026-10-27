@@ -1,0 +1,21 @@
+.sb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sb-glyph {
+  font-size: 0.7rem;
+}
+.sb-flagged {
+  color: var(--flagged);
+}
+.sb-proposed {
+  color: var(--ink-2);
+}
+.sb-approved,
+.sb-edited {
+  color: var(--ok);
+}
