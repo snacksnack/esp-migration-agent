@@ -1,0 +1,53 @@
+{
+ "audience_a": {
+  "subscribed": 258,
+  "unsubscribed": 18
+ },
+ "audience_b": {
+  "subscribed": 279,
+  "unsubscribed": 28
+ },
+ "corpus": "multi_audience",
+ "expected_risk_codes": [
+  "multiple_audiences"
+ ],
+ "overlap_consent_conflicts": [
+  "angelica.wiley2@hotmail.com",
+  "apayne@white-gonzalez.info",
+  "ashley.hardy95@hotmail.com",
+  "brianna.meyer78@gmail.com",
+  "carrie.smith758@hotmail.com",
+  "cassidy.salinas36@outlook.com",
+  "csmith@hawkins.com",
+  "dphillips@blackwell.com",
+  "eric.brown564@gmail.com",
+  "kaitlyn.peterson194@outlook.com",
+  "michele.miller26@gmail.com",
+  "robert.gomez701@gmail.com",
+  "rsantiago@lam-evans.org",
+  "sean.holt936@hotmail.com",
+  "teresa.ramirez219@yahoo.com"
+ ],
+ "overlap_same_consent": [
+  "amanda.taylor629@gmail.com",
+  "anna.bass758@gmail.com",
+  "ashley.kent797@gmail.com",
+  "chad.gonzales25@hotmail.com",
+  "cmccoy@holloway.biz",
+  "holly.roberts467@gmail.com",
+  "james.howard641@gmail.com",
+  "jduarte@page.org",
+  "john.craig964@gmail.com",
+  "lisa.hatfield139@outlook.com",
+  "rallen@barton.info",
+  "regina.sutton243@gmail.com",
+  "rmoss@lee.com",
+  "robert.hooper28@yahoo.com",
+  "robert.mcintosh73@yahoo.com",
+  "sarah.patterson430@gmail.com",
+  "smonroe@jacobs.com",
+  "steven.miller241@gmail.com",
+  "vcurry@hanson.net",
+  "william.miller32@gmail.com"
+ ]
+}

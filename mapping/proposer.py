@@ -149,6 +149,15 @@ def mapping_payload(bundle: MailchimpBundle, inventory: Inventory, target: str) 
              "notes": "parsed to UTC at ingest"},
             {"source_field": "CONFIRM_TIME", "source_type": "datetime",
              "notes": "parsed to UTC at ingest"},
+            # Custom merge fields beyond the standard set (RC1-572): shown
+            # with every distinct sample ingest kept, so mixed formats are
+            # visible to the model exactly as they are to a reviewer.
+            *(
+                {"source_field": column, "source_type": "text",
+                 "notes": "custom merge field (observed values, not a declared type)",
+                 "sample_values": samples}
+                for column, samples in bundle.extra_columns.items()
+            ),
         ],
         "segments": [
             {

@@ -3,6 +3,66 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0017: Breadth corpora are synthetic, built, and pinned to the genuine capture's shape (2026-10-27)
+
+**Decision.** RC1-572 (external review finding, GPT-6 Astra #12): the engine
+was only ever exercised against one clean audience. The breadth corpora are
+SYNTHETIC - rendered from `seeding/generator.py` by a bundle writer
+(`seeding/bundle_writer.py`) - not further live Mailchimp captures. A genuine
+capture is UI-triggered, one per 24h, and dies with the trial account; half
+the scope (malformed exports, pre-populated targets) cannot be captured by
+nature. ADR-0001's authority is preserved by pinning the writer to the
+capture rather than to my reading of it: the writer's headers equal the
+genuine export's header-for-header per bucket (a test caught that
+unsubscribed carries UNSUB_* and NO LAST_CHANGED), timestamps round-trip
+through the account timezone, and pending members are omitted exactly as
+the real export omits them. The corpora are committed under
+`fixtures/synthetic/` and must equal a fresh `python -m seeding.build_corpora`
+byte for byte; malformed variants are built per test, never committed.
+
+**Seed what exposes the limit; do not generalize past it.** Each corpus
+surfaces a limit loudly instead of fixing it out of scope:
+
+- *Custom merge fields* (LOYALTY_TIER mixed-format, POINTS uniform): ingest
+  now reports every data-bearing column outside the standard export set
+  (`MailchimpBundle.extra_columns`, raw sorted samples), discovery risks it
+  HIGH (`unmigrated_custom_fields`), and the proposer payload carries it so
+  `check_completeness` forbids silently dropping one. The executor still
+  reads a fixed field set and refuses a spec that maps a custom field -
+  migrating them is the source-generalization question (#10), still
+  declined here.
+- *Multiple audiences*: the parser reads one audience and refuses two in one
+  folder; discovery risks `multiple_audiences` when campaigns target more
+  than one list. Every audience plans into the same destination list name -
+  pinned by test: the suppression invariant holds across audiences (an
+  address unsubscribed in A stays protected when B says subscribed, per
+  ADR-0013) and reconciliation fails naming exactly the other audience's
+  addresses. Per-audience destination lists are follow-up RC1-573.
+- *Pre-populated targets* (fixture scale: 300 stricter, 200 laxer, 150
+  unrelated): protection is kept and re-reported every run, every
+  suppression lands, unrelated contacts are untouched. Reconciliation
+  assumes the list started empty and fails naming exactly the pre-existing
+  addresses and the kept conflicts - precise, never silent. Baselining
+  pre-existing members is follow-up RC1-574.
+- *Malformed exports*: mid-row truncation, surplus cells, latin-1/UTF-16,
+  semicolon re-saves, missing or truncated supplement files, headers-only
+  and missing buckets all die with a named IngestError. Two findings: a
+  truncation that cuts only a row's trailing metadata parsed silently (every
+  REQUIRED field intact) - ingest now refuses any row whose cell count
+  differs from the header's; and truncation exactly at a row boundary leaves
+  a valid shorter CSV no parser can detect - discovery now compares the
+  subscribed rows against the source's own recipient count for an
+  unsegmented campaign (`export_row_count_mismatch`, HIGH). A UTF-8 BOM
+  (Excel re-save) is accepted: the file is still UTF-8.
+- *Conditional and function merge tags* (IF:/ELSE:/END:IF, DATE:): risked
+  MEDIUM at discovery; the plan already refuses any untranslated tag.
+
+**Evals.** The new ambiguity class - a custom field with mixed formats - got
+the case `custom-fields` (frozen from the corpus, with a freshness test):
+must_flag LOYALTY_TIER plus the generator's ZIP/LASTPURCH seedings,
+must_propose POINTS as the precision twin. First billed run green on all
+three cases ($0.431 / 179s); the ceiling re-baselined to ~2x that.
+
 ## ADR-0016: The journal records the run; the destination binds by record, not by approval (2026-10-27)
 
 **Decision.** RC1-571 (external review finding, GPT-6 Astra #7): execution
