@@ -9,6 +9,12 @@ diff (against the live target when ESP_LISTMONK_* is configured, against an
 assumed-empty target otherwise). --execute migrates suppressions first,
 upserts throughout, and prints the write summary; a second run converges to
 zero writes.
+
+--verify-convergence (RC1-557) proves that instead of asking an operator to
+re-run and read the summary: after --execute it re-reads the target and
+diffs again, read-only, and exits 1 unless a further pass would write
+nothing (the result is journaled). On a dry run it is the same check
+against the target as it stands.
 """
 
 from __future__ import annotations
@@ -18,16 +24,33 @@ import sys
 from pathlib import Path
 
 from executor.clients import TARGETS, client_for_target
-from executor.engine import compute_diff, execute, render_diff
+from executor.engine import PlanDiff, compute_diff, execute, render_diff
 from executor.journal import ExecutionJournal, spec_provenance
-from executor.plan import PlanError, build_plan
-from executor.target import TargetError
+from executor.plan import MigrationPlan, PlanError, build_plan
+from executor.target import TargetClient, TargetError
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from mapping.gate import GateError, load_approved, verify_source
 from telemetry import count, stage
 
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
+
+
+def read_diff(plan: MigrationPlan, client: TargetClient, list_id: int | None) -> PlanDiff:
+    """The diff against the target as it stands, read-only: the same global
+    lookup execute() makes, so attaches and conflicts show as they will."""
+    current = client.current_subscribers(list_id) if list_id is not None else {}
+    elsewhere = client.lookup_subscribers(
+        [d.email for d in plan.all_subscribers if d.email.lower() not in current]
+    )
+    return compute_diff(plan, current, client.current_campaigns(), elsewhere)
+
+
+def render_pending(diff: PlanDiff) -> str:
+    pending = diff.writes
+    shown = ", ".join(f"{e.action} {e.key}" for e in pending[:5])
+    more = f" and {len(pending) - 5:,} more" if len(pending) > 5 else ""
+    return f"{len(pending):,} write(s) still pending: {shown}{more}"
 
 
 def main() -> int:
@@ -52,6 +75,11 @@ def main() -> int:
         type=Path,
         default=Path("docs/execution_journal.jsonl"),
         help="append-only JSONL run record (RC1-571); written only with --execute",
+    )
+    parser.add_argument(
+        "--verify-convergence",
+        action="store_true",
+        help="exit 1 unless a further pass would write nothing (read-only re-diff)",
     )
     args = parser.parse_args()
 
@@ -94,20 +122,17 @@ def main() -> int:
                 list_id = client.ensure_list(plan.list_name)
             else:
                 list_id = client.find_list(plan.list_name)
-            current = (
-                client.current_subscribers(list_id) if list_id is not None else {}
-            )
-            # Same global lookup execute() makes, read-only, so the dry run
-            # shows the attaches and conflicts the real run will make.
-            elsewhere = client.lookup_subscribers(
-                [d.email for d in plan.all_subscribers if d.email.lower() not in current]
-            )
-            diff = compute_diff(plan, current, client.current_campaigns(), elsewhere)
+            diff = read_diff(plan, client, list_id)
             print(render_diff(diff))
             if not args.execute:
                 if list_id is None:
                     print(f"\nlist {plan.list_name!r} does not exist; --execute would create it")
                 print("\ndry run only; pass --execute to write")
+                if args.verify_convergence:
+                    if diff.writes or list_id is None:
+                        print(f"NOT CONVERGED: {render_pending(diff)}", file=sys.stderr)
+                        return 1
+                    print("converged: a pass now would write nothing")
                 return 0
 
             journal.plan(diff)
@@ -117,6 +142,11 @@ def main() -> int:
                 count("executor_write_errors", tags={"target": args.target})
                 raise
             journal.run_complete(summary)
+            pending = (
+                read_diff(plan, client, summary.list_id) if args.verify_convergence else None
+            )
+            if pending is not None:
+                journal.convergence(pending)
             count(
                 "executor_writes",
                 value=sum(summary.written.values()),
@@ -139,6 +169,11 @@ def main() -> int:
                 f"{len(summary.conflicts):,} address(es): {shown}{more} "
                 "(ADR-0013: protection is never downgraded)"
             )
+        if pending is not None:
+            if pending.writes:
+                print(f"NOT CONVERGED: {render_pending(pending)}", file=sys.stderr)
+                return 1
+            print("converged: a second pass would write nothing")
         return 0
     except (GateError, PlanError, TargetError) as exc:
         if journal is not None:
