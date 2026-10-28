@@ -183,6 +183,10 @@ def execute(
     elsewhere = client.lookup_subscribers(
         [d.email for d in plan.all_subscribers if d.email.lower() not in current]
     )
+    if journal is not None:
+        # The destination as found, before the first write (RC1-574): what
+        # reconciliation later accepts as pre-existing, and nothing else.
+        journal.baseline(list_id, current, elsewhere)
     written: Counter = Counter()
     skipped = 0
     conflicts: list[str] = []

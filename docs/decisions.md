@@ -3,6 +3,49 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0019: Reconcile against the destination as the first run found it (2026-10-27)
+
+**Decision.** RC1-574 (follow-up to ADR-0017): reconciliation no longer
+assumes an empty destination when it can prove otherwise. The first
+`--execute` journals a `baseline` event (ADR-0016's journal, not a new store)
+after its first read and before its first write: every member of the list
+with its consent, plus the account-wide status of planned addresses not on it
+(the RC1-573 cross-audience case). Reconcile (`--journal`) reads the FIRST
+baseline for that destination identity and list name and:
+
+- leaves pre-existing members outside the plan out of membership (a contact
+  added after the baseline is still unexpected);
+- accepts a planned address landing stricter than planned as an expected
+  deviation ONLY when the baseline shows it already protected and it landed
+  protected with its global status as found - reported in its own section,
+  never a failure;
+- adds a check the plan alone cannot make: an address the baseline shows
+  protected that is now mailable is a downgrade, and fails, even when that
+  is exactly what the plan said;
+- counts segments over the population that should be on the list (the plan,
+  deviations as landed, pre-existing members as they are).
+
+Suppression integrity never consults the baseline: 100%, unconditional.
+
+**Only a pristine baseline counts.** A run after the migration has written
+would record the migration's own records as pre-existing, so a baseline is
+journaled only while no write to that destination list has ever been
+journaled; a list migrated before RC1-574 never gets one, and reconcile says
+so and falls back to the empty-destination checks. A baseline for another
+list id (same name, recreated) does not apply. Without a journal (or with
+`find_baseline` finding none) the behavior is exactly the old one.
+
+**Why the journal.** It already binds a run to a destination identity
+(ADR-0016) and is append-only; a baseline taken at reconcile time would see
+the migration's writes, and one held in the spec would need the destination
+to exist at review time, which it often does not.
+
+**Consequences.** The baseline is one JSON line sized by the list; a very
+large customer list makes a large first line, acceptable for an append-only
+record read once per reconcile. Reconciling with a different journal file
+than the run used reads as no baseline - loud (FAIL naming the pre-existing
+addresses), never a false pass.
+
 ## ADR-0018: One audience per spec, per list; contacts are global (2026-10-27)
 
 **Decision.** RC1-573 (follow-up to ADR-0017): each Mailchimp audience is
