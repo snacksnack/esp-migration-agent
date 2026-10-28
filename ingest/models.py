@@ -69,6 +69,10 @@ class CampaignMeta(BaseModel):
     subject_line: str
     from_name: str
     list_id: str
+    # The audience's NAME: the identity an audience export and the account
+    # export share (account files are <bucket>_<id>_<name>.csv; the audience
+    # CSVs carry none). Empty when the supplement predates RC1-573.
+    list_name: str = ""
     recipient_count: int
     saved_segment_id: int | None
     html: str

@@ -97,7 +97,12 @@ def main() -> int:
             current = (
                 client.current_subscribers(list_id) if list_id is not None else {}
             )
-            diff = compute_diff(plan, current, client.current_campaigns())
+            # Same global lookup execute() makes, read-only, so the dry run
+            # shows the attaches and conflicts the real run will make.
+            elsewhere = client.lookup_subscribers(
+                [d.email for d in plan.all_subscribers if d.email.lower() not in current]
+            )
+            diff = compute_diff(plan, current, client.current_campaigns(), elsewhere)
             print(render_diff(diff))
             if not args.execute:
                 if list_id is None:

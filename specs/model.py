@@ -116,7 +116,7 @@ class Approval(BaseModel):
 
 # Optional provenance fields the approval binds when present; unset fields
 # are omitted from hashing and YAML so older signed specs stay valid.
-PROVENANCE_FIELDS = ("source_fingerprint", "source_timezone")
+PROVENANCE_FIELDS = ("source_fingerprint", "source_timezone", "source_audience")
 
 
 class MappingSpec(BaseModel):
@@ -133,6 +133,11 @@ class MappingSpec(BaseModel):
     # runs against the exact inputs that were reviewed. None on older specs.
     source_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     source_timezone: str | None = Field(default=None, min_length=1)
+    # Which audience the export is (RC1-573): names the destination list and
+    # scopes the campaigns, so two audiences of one account land in two
+    # lists. Bound by the approval like the fields above. None on older specs
+    # (the legacy single list name; refused if the supplement spans several).
+    source_audience: str | None = Field(default=None, min_length=1)
     generated_at: datetime
     status: SpecStatus = SpecStatus.DRAFT
     field_mappings: list[FieldMapping] = []

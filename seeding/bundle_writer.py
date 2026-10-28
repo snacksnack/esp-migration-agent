@@ -133,8 +133,10 @@ def make_segment(seg_id: int, name: str, conditions: list[dict],
 
 def make_campaign(campaign_id: str, title: str, subject: str, html: str,
                   list_id: str, recipient_count: int,
-                  saved_segment_id: int | None = None) -> dict:
+                  saved_segment_id: int | None = None, list_name: str = "") -> dict:
     recipients: dict = {"list_id": list_id, "recipient_count": recipient_count}
+    if list_name:  # the audience name, as the captured supplement carries it
+        recipients["list_name"] = list_name
     if saved_segment_id is not None:
         recipients["segment_opts"] = {"saved_segment_id": saved_segment_id}
     return {

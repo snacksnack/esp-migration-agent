@@ -24,6 +24,7 @@ from executor.retries import IDEMPOTENT_METHODS, Recovered, call_with_retries
 from executor.target import TargetError, TargetSubscriber
 
 PAGE_SIZE = 1000
+LOOKUP_BATCH = 200  # addresses per IN (...) lookup query
 
 
 class ListmonkSettings(BaseSettings):
@@ -130,11 +131,12 @@ class ListmonkClient:
     # --- subscribers ---------------------------------------------------------
 
     @staticmethod
-    def _normalize(row: dict, list_id: int) -> TargetSubscriber:
+    def _normalize(row: dict, list_id: int | None) -> TargetSubscriber:
+        lists = row.get("lists") or []
         subscription = next(
             (
                 lst.get("subscription_status", "")
-                for lst in row.get("lists", [])
+                for lst in lists
                 if lst.get("id") == list_id
             ),
             "",
@@ -146,6 +148,43 @@ class ListmonkClient:
             status=row["status"],
             subscription=subscription,
             attribs=row.get("attribs") or {},
+            list_ids=sorted(lst["id"] for lst in lists if "id" in lst),
+        )
+
+    def lookup_subscribers(self, emails: list[str]) -> dict[str, TargetSubscriber]:
+        out: dict[str, TargetSubscriber] = {}
+        for start in range(0, len(emails), LOOKUP_BATCH):
+            batch = emails[start:start + LOOKUP_BATCH]
+            quoted = ", ".join("'" + e.lower().replace("'", "''") + "'" for e in batch)
+            data = self._call(
+                "GET",
+                "/subscribers",
+                f"look up {len(batch)} subscriber(s)",
+                params={
+                    "query": f"LOWER(subscribers.email) IN ({quoted})",
+                    "page": 1,
+                    "per_page": len(batch),
+                },
+            )
+            for row in data["results"]:
+                sub = self._normalize(row, None)
+                out[sub.email.lower()] = sub
+        return out
+
+    def attach_subscriber(self, existing: TargetSubscriber, list_id: int) -> None:
+        # Bulk add with subscription "unsubscribed": membership only. The
+        # global status (blocklisted) is untouched - probed against a live
+        # Listmonk (ADR-0018).
+        self._call(
+            "PUT",
+            "/subscribers/lists",
+            f"attach {existing.email}",
+            json={
+                "ids": [existing.id],
+                "action": "add",
+                "target_list_ids": [list_id],
+                "status": "unsubscribed",
+            },
         )
 
     def current_subscribers(self, list_id: int) -> dict[str, TargetSubscriber]:
@@ -165,12 +204,17 @@ class ListmonkClient:
                 return out
             page += 1
 
-    def _subscriber_body(self, desired: DesiredSubscriber, list_id: int) -> dict:
+    def _subscriber_body(
+        self, desired: DesiredSubscriber, list_id: int, keep_lists: list[int] | None = None
+    ) -> dict:
         return {
             "email": desired.email,
             "name": desired.name,
             "status": desired.status,
-            "lists": [list_id],
+            # PUT REPLACES memberships: sending only this list would drop the
+            # record from every other list it is on. Existing subscriptions
+            # keep their status when re-listed (probed, ADR-0018).
+            "lists": sorted({*(keep_lists or []), list_id}),
             "attribs": desired.attribs,
             # confirmed lands via preconfirm; unconfirmed is the double-optin
             # default. No opt-in email is triggered by the import itself.
@@ -211,7 +255,7 @@ class ListmonkClient:
             "PUT",
             f"/subscribers/{existing.id}",
             f"update subscriber {desired.email}",
-            json=self._subscriber_body(desired, list_id),
+            json=self._subscriber_body(desired, list_id, keep_lists=existing.list_ids),
         )
         if desired.subscription == "unsubscribed" and desired.status != "blocklisted":
             self._set_subscription(existing.id, list_id, "unsubscribe", desired.email)

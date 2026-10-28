@@ -15,6 +15,7 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 from discovery.inventory import Inventory
+from ingest.mailchimp import audiences_in
 from ingest.models import ConsentBucket, MailchimpBundle
 
 # What each supported target's segmentation can express. A condition type
@@ -202,16 +203,19 @@ def _breadth_risks(bundle: MailchimpBundle, inventory: Inventory) -> list[Risk]:
 
     list_ids = sorted({c.list_id for c in bundle.campaigns})
     if len(list_ids) > 1:
+        names = audiences_in(bundle) or list_ids
         risks.append(
             Risk(
                 code="multiple_audiences",
                 severity=Severity.HIGH,
                 title="The account has more than one audience",
                 detail=(
-                    f"Campaigns target {len(list_ids)} audiences ({', '.join(list_ids)}); "
-                    "an audience export carries one. Each audience needs its own export, "
-                    "review, and destination list - migrating two into one list merges "
-                    "them, and an address in both may carry different consent in each."
+                    f"Campaigns target {len(list_ids)} audiences ({', '.join(names)}); "
+                    "an audience export carries one. Each audience is exported, proposed "
+                    "(--audience), reviewed, and migrated on its own into its own "
+                    "destination list. An address on several audiences is ONE contact on "
+                    "the target: where one audience suppressed it, the others' runs keep "
+                    "it suppressed and report a conflict - protection is never downgraded."
                 ),
                 count=len(list_ids),
             )

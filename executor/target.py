@@ -21,8 +21,11 @@ class TargetSubscriber(BaseModel):
     email: str
     name: str
     status: str
-    subscription: str
+    subscription: str  # on the queried list; "" when the record is not on it
     attribs: dict[str, str | int]
+    # Every list the target reports this record on. An update must preserve
+    # them: Listmonk's PUT replaces list memberships wholesale (RC1-573).
+    list_ids: list[int] = []
 
 
 class TargetError(RuntimeError):
@@ -45,7 +48,20 @@ class TargetClient(Protocol):
         ...
 
     def current_subscribers(self, list_id: int) -> dict[str, TargetSubscriber]:
-        """Current target state, keyed by lowercased email."""
+        """Current members of the list, keyed by lowercased email."""
+        ...
+
+    def lookup_subscribers(self, emails: list[str]) -> dict[str, TargetSubscriber]:
+        """Records ANYWHERE on the target for these addresses, keyed by
+        lowercased email; absent addresses are omitted. Contacts are global
+        on every supported target, so an address missing from this list may
+        still exist - protected - on another (RC1-573). Read-only."""
+        ...
+
+    def attach_subscriber(self, existing: TargetSubscriber, list_id: int) -> None:
+        """Add an existing record to the list WITHOUT touching its consent:
+        the only write the executor makes for an address the destination
+        already protects (ADR-0013, ADR-0018)."""
         ...
 
     def create_subscriber(self, desired: DesiredSubscriber, list_id: int) -> None: ...
@@ -83,6 +99,9 @@ class OfflineTarget:
     def current_subscribers(self, list_id: int) -> dict[str, TargetSubscriber]:
         return {}
 
+    def lookup_subscribers(self, emails: list[str]) -> dict[str, TargetSubscriber]:
+        return {}
+
     def current_campaigns(self) -> dict[str, PlannedCampaign]:
         return {}
 
@@ -94,6 +113,7 @@ class OfflineTarget:
 
     create_subscriber = _refuse
     update_subscriber = _refuse
+    attach_subscriber = _refuse
     create_campaign = _refuse
     update_campaign = _refuse
     count_query = _refuse
