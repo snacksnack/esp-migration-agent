@@ -14,6 +14,13 @@ Checks, all deterministic:
   and a render comparison - both sides substituted with the same sample
   values - proves the translation preserved the surrounding content
 
+Against a destination that already held data (RC1-574, ADR-0019), the first
+run's journaled baseline says what was there: pre-existing members are left
+out of membership, and a planned address the destination ALREADY protected
+and still protects - status untouched - is an expected deviation (ADR-0013),
+reported on its own and not a failure. Without a baseline the destination is
+assumed empty, as before. Suppression integrity never consults the baseline.
+
 Usage: uv run python -m executor.reconcile --spec specs/approved/<spec>.yaml
 """
 
@@ -29,9 +36,16 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from executor.clients import TARGETS, client_for_target
-from executor.plan import MERGE_TAG_RE, DesiredSubscriber, MigrationPlan, build_plan
+from executor.journal import Baseline, find_baseline
+from executor.plan import (
+    MERGE_TAG_RE,
+    DesiredSubscriber,
+    MigrationPlan,
+    build_plan,
+    existing_record_protected,
+)
 from executor.queries import QueryNotEvaluatable, evaluate_query
-from executor.target import TargetClient, TargetError
+from executor.target import TargetClient, TargetError, TargetSubscriber
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
 from ingest.models import MailchimpBundle
 from mapping.gate import load_approved, verify_source
@@ -41,7 +55,7 @@ from telemetry import count, stage
 FIXTURE_AUDIENCE = Path("fixtures/mailchimp_export/audience")
 FIXTURE_SUPPLEMENT = Path("fixtures/api_supplement")
 SAMPLE_TARGET = 50
-
+DEFAULT_JOURNAL = Path("docs/execution_journal.jsonl")
 
 
 def subscriber_checksum(email: str, name: str, status: str, subscription: str,
@@ -107,11 +121,22 @@ class MembershipCheck(BaseModel):
     expected: int
     actual: int
     missing: list[str]  # planned, absent from the target list
-    unexpected: list[str]  # in the target list, not in the plan
+    unexpected: list[str]  # in the target list, not in the plan, not in the baseline
+    preexisting: int = 0  # in the list before the first run, not planned: excluded
 
     @property
     def ok(self) -> bool:
         return not self.missing and not self.unexpected
+
+
+class Deviation(BaseModel):
+    """A planned address left at the destination's stricter consent: the
+    baseline shows it protected before the migration, and it still is."""
+
+    email: str
+    planned: str  # "status/subscription"
+    before: str
+    landed: str
 
 
 class CampaignCheck(BaseModel):
@@ -128,12 +153,18 @@ class ReconciliationReport(BaseModel):
     segments: list[SegmentCheck]
     checksums: ChecksumCheck
     campaigns: list[CampaignCheck]
+    baseline_run: str | None = None
+    baseline_note: str = ""  # why no baseline applies (empty when one does)
+    deviations: list[Deviation] = []
+    # Protected in the baseline, mailable now: ADR-0013 broken, whatever the plan says.
+    downgrades: list[str] = []
 
     @property
     def passed(self) -> bool:
         return (
             all(c.ok for c in self.consent_counts)
             and not self.suppression.violations
+            and not self.downgrades
             and self.membership.ok
             and all(s.ok for s in self.segments)
             and not self.checksums.mismatches
@@ -172,29 +203,101 @@ def _render_target(body: str) -> str:
     return _GO_EXPR_RE.sub(lambda m: _go_value(m.group(0)), body)
 
 
+def _deviation(
+    d: DesiredSubscriber, landed: TargetSubscriber, target: str, baseline: Baseline
+) -> Deviation | None:
+    """Accepted only with evidence: the migration wanted this address
+    subscribable, the baseline shows the destination already protected it,
+    and it landed protected with its global status as found. A record the
+    migration itself made stricter has no baseline evidence and still fails."""
+    key = d.email.lower()
+    if key in baseline.members:
+        before_status, before_subscription = baseline.members[key]
+    elif key in baseline.elsewhere:
+        before_status, before_subscription = baseline.elsewhere[key], ""
+    else:
+        return None
+    if not (
+        d.subscribable
+        and existing_record_protected(target, before_status, before_subscription)
+        and landed.status == before_status
+        and existing_record_protected(target, landed.status, landed.subscription)
+    ):
+        return None
+    return Deviation(
+        email=d.email,
+        planned=f"{d.status}/{d.subscription}",
+        before=f"{before_status}/{before_subscription or '(another list)'}",
+        landed=f"{landed.status}/{landed.subscription}",
+    )
+
+
 def build_reconciliation(
     plan: MigrationPlan,
     spec: MappingSpec,
     bundle: MailchimpBundle,
     client: TargetClient,
     list_id: int,
+    baseline: Baseline | None = None,
+    baseline_note: str = "",
 ) -> ReconciliationReport:
     current = client.current_subscribers(list_id)
 
     plan_emails = {d.email.lower() for d in plan.all_subscribers}
+    preexisting = (
+        {k for k in baseline.members if k not in plan_emails} & current.keys()
+        if baseline
+        else set()
+    )
     membership = MembershipCheck(
         expected=len(plan_emails),
         actual=len(current),
         missing=sorted(plan_emails - current.keys()),
-        unexpected=sorted(current.keys() - plan_emails),
+        unexpected=sorted(current.keys() - plan_emails - preexisting),
+        preexisting=len(preexisting),
     )
 
+    deviations: dict[str, Deviation] = {}
+    if baseline is not None:
+        for d in plan.all_subscribers:
+            landed = current.get(d.email.lower())
+            if landed is None or (landed.status, landed.subscription) == (
+                d.status, d.subscription
+            ):
+                continue
+            found = _deviation(d, landed, plan.target, baseline)
+            if found is not None:
+                deviations[d.email.lower()] = found
+
+    downgrades = []
+    if baseline is not None:
+        for email, landed in sorted(current.items()):
+            if email in baseline.members:
+                before = baseline.members[email]
+            elif email in baseline.elsewhere:
+                before = (baseline.elsewhere[email], "")
+            else:
+                continue
+            if existing_record_protected(plan.target, *before) and not (
+                existing_record_protected(plan.target, landed.status, landed.subscription)
+            ):
+                downgrades.append(landed.email)
+
+    # What should be on the list: the plan, with each accepted deviation as
+    # it landed, plus the pre-existing members as they are.
     expected_counts: dict[tuple[str, str], int] = {}
     for d in plan.all_subscribers:
-        key = (d.status, d.subscription)
+        landed = current.get(d.email.lower())
+        key = (
+            (landed.status, landed.subscription)
+            if d.email.lower() in deviations and landed
+            else (d.status, d.subscription)
+        )
         expected_counts[key] = expected_counts.get(key, 0) + 1
     actual_counts: dict[tuple[str, str], int] = {}
-    for sub in current.values():
+    for email, sub in current.items():
+        if email in preexisting:
+            continue
         key = (sub.status, sub.subscription)
         actual_counts[key] = actual_counts.get(key, 0) + 1
     consent_counts = [
@@ -206,7 +309,11 @@ def build_reconciliation(
         for (status, subscription), n in sorted(expected_counts.items())
     ]
     consent_counts.append(
-        CountCheck(label="total", expected=len(plan.all_subscribers), actual=len(current))
+        CountCheck(
+            label="total",
+            expected=len(plan.all_subscribers),
+            actual=len(current) - len(preexisting),
+        )
     )
 
     violations = []
@@ -222,12 +329,15 @@ def build_reconciliation(
         violations=violations,
     )
 
+    # The population a segment query should see on this list.
+    population = [
+        current[d.email.lower()].attribs if d.email.lower() in deviations else d.attribs
+        for d in plan.all_subscribers
+    ] + [current[k].attribs for k in sorted(preexisting)]
     segments = []
     for seg in plan.segments:
         try:
-            plan_count = sum(
-                1 for d in plan.all_subscribers if evaluate_query(seg.query, d.attribs)
-            )
+            plan_count = sum(1 for attribs in population if evaluate_query(seg.query, attribs))
         except QueryNotEvaluatable:
             plan_count = None
         segments.append(
@@ -243,6 +353,8 @@ def build_reconciliation(
     sample = _sample(plan)
     mismatches = []
     for d in sample:
+        if d.email.lower() in deviations:
+            continue  # reported as a deviation, never silently matched
         landed = current.get(d.email.lower())
         expected_sum = subscriber_checksum(
             d.email, d.name, d.status, d.subscription, d.attribs
@@ -291,11 +403,18 @@ def build_reconciliation(
         segments=segments,
         checksums=checksums,
         campaigns=campaign_checks,
+        baseline_run=baseline.run_id if baseline else None,
+        baseline_note=baseline_note,
+        deviations=list(deviations.values()),
+        downgrades=downgrades,
     )
 
 
 def reconcile(
-    bundle: MailchimpBundle, spec: MappingSpec, client: TargetClient
+    bundle: MailchimpBundle,
+    spec: MappingSpec,
+    client: TargetClient,
+    journal: Path | None = None,
 ) -> ReconciliationReport:
     plan = build_plan(bundle, spec)
     # Reconciliation reads; it never creates the list it is checking (RC1-564).
@@ -305,7 +424,18 @@ def reconcile(
             f"list {plan.list_name!r} not found in the target; nothing to "
             "reconcile - run the executor first"
         )
-    return build_reconciliation(plan, spec, bundle, client, list_id)
+    if journal is None:
+        return build_reconciliation(
+            plan, spec, bundle, client, list_id, None, "no journal given; destination assumed empty"
+        )
+    lookup = find_baseline(journal, client.describe_destination(), plan.list_name)
+    baseline, note = lookup.baseline, lookup.reason
+    if baseline is not None and baseline.list_id != list_id:
+        baseline, note = None, (
+            f"baseline {baseline.run_id} was taken of list {baseline.list_id}, not "
+            f"{list_id} (recreated since?); destination assumed empty"
+        )
+    return build_reconciliation(plan, spec, bundle, client, list_id, baseline, note)
 
 
 def render_markdown(report: ReconciliationReport) -> str:
@@ -325,10 +455,32 @@ def render_markdown(report: ReconciliationReport) -> str:
     )]
     s = report.suppression
     sections += [
+        "## Baseline",
+        (
+            f"Destination as found by run {report.baseline_run}: "
+            f"{report.membership.preexisting:,} pre-existing member(s) outside the plan "
+            "are excluded from membership."
+            if report.baseline_run
+            else f"No baseline: {report.baseline_note}."
+        ),
+    ]
+    sections += [
         "## Suppression integrity (required: 100%)",
         f"{s.non_subscribable:,} of {s.total:,} suppressed addresses are "
         f"non-subscribable in the target ({s.pct}%)."
         + (f" VIOLATIONS: {', '.join(s.violations[:10])}" if s.violations else ""),
+        "## Protection kept (required: no downgrades)",
+        (
+            f"DOWNGRADED: {len(report.downgrades):,} address(es) the destination "
+            f"protected before the migration are mailable now: "
+            f"{', '.join(report.downgrades[:10])}"
+            if report.downgrades
+            else (
+                "Every address the baseline shows protected is still protected."
+                if report.baseline_run
+                else "Not checked: no baseline."
+            )
+        ),
         "## Membership (every address, both directions)",
         f"{report.membership.actual:,} addresses in the target list vs "
         f"{report.membership.expected:,} planned: "
@@ -343,6 +495,29 @@ def render_markdown(report: ReconciliationReport) -> str:
             f" UNEXPECTED: {', '.join(report.membership.unexpected[:10])}"
             if report.membership.unexpected
             else ""
+        ),
+        "## Expected deviations (kept stricter consent, ADR-0013)",
+        (
+            "\n".join(
+                [
+                    f"{len(report.deviations):,} planned address(es) the destination "
+                    "already protected stay protected - not failures:",
+                    "",
+                    "| Address | Planned | Before | Landed |",
+                    "| --- | --- | --- | --- |",
+                ]
+                + [
+                    f"| {d.email} | {d.planned} | {d.before} | {d.landed} |"
+                    for d in report.deviations[:25]
+                ]
+                + (
+                    [f"\n...and {len(report.deviations) - 25:,} more."]
+                    if len(report.deviations) > 25
+                    else []
+                )
+            )
+            if report.deviations
+            else "None."
         ),
         "## Segment parity",
         "\n".join(
@@ -390,6 +565,12 @@ def main() -> int:
     parser.add_argument("--account-tz", default=DEFAULT_ACCOUNT_TZ)
     parser.add_argument("--target", choices=TARGETS, default="listmonk")
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument(
+        "--journal",
+        type=Path,
+        default=DEFAULT_JOURNAL,
+        help="execution journal holding the destination's baseline (RC1-574)",
+    )
     args = parser.parse_args()
 
     with stage("reconcile", target=args.target):
@@ -404,7 +585,7 @@ def main() -> int:
         verify_source(spec, args.audience_dir, args.supplement_dir, args.account_tz)
         bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
         client = client_for_target(args.target, need_writes=True)
-        report = reconcile(bundle, spec, client)
+        report = reconcile(bundle, spec, client, args.journal)
     count(
         "reconcile_result",
         tags={"outcome": "pass" if report.passed else "fail", "target": args.target},

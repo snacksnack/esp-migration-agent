@@ -12,6 +12,13 @@ per completed write (phase, action, key; `recovered: true` when the adapter's
 read-back stood in for a lost response, RC1-570), `conflict` per address kept
 at the destination's stricter consent (ADR-0013), and `run_failed` (the last
 error, response text included) or `run_complete` (the summary).
+
+`baseline` (RC1-574, ADR-0019): the destination as the migration found it -
+every member of the list with its consent, plus account-wide records for
+planned addresses not on it - captured after the first read and before the
+first write, ONLY while no write to that destination list has ever been
+journaled. Later runs would see the migration's own writes, so the first
+baseline is the only one; reconcile reads it back with `find_baseline`.
 """
 
 from __future__ import annotations
@@ -21,8 +28,65 @@ import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from executor.engine import ExecutionSummary, PlanDiff
+from executor.target import TargetSubscriber
 from specs.model import MappingSpec
+
+
+class Baseline(BaseModel):
+    """Pre-migration state of one destination list (RC1-574)."""
+
+    run_id: str
+    list_id: int
+    members: dict[str, tuple[str, str]]  # email -> (status, subscription) on the list
+    elsewhere: dict[str, str]  # planned email off the list -> global status
+
+
+class BaselineLookup(BaseModel):
+    baseline: Baseline | None
+    written_before: bool = False  # writes predate any baseline: none can be taken now
+    reason: str = ""  # why there is none (empty when there is one)
+
+
+def read_events(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def find_baseline(path: Path, destination: dict, list_name: str) -> BaselineLookup:
+    """The first baseline journaled for this destination list - and only if no
+    write to it was journaled before that baseline (a baseline taken after the
+    migration wrote would count the migration's own records as pre-existing)."""
+    runs: set[str] = set()
+    for event in read_events(path):
+        if event["event"] == "run_start":
+            if event.get("destination") == destination and event.get("list_name") == list_name:
+                runs.add(event["run_id"])
+        elif event.get("run_id") not in runs:
+            continue
+        elif event["event"] == "baseline":
+            return BaselineLookup(
+                baseline=Baseline.model_validate(
+                    {k: event[k] for k in ("run_id", "list_id", "members", "elsewhere")}
+                )
+            )
+        elif event["event"] == "write":
+            return BaselineLookup(
+                baseline=None,
+                written_before=True,
+                reason="the journal records writes to this list before any baseline "
+                "(migrated before RC1-574); destination assumed empty",
+            )
+    if not runs:
+        return BaselineLookup(
+            baseline=None,
+            reason=f"no journaled run for list {list_name!r} on this destination; "
+            "destination assumed empty",
+        )
+    return BaselineLookup(baseline=None, reason="no baseline journaled; destination assumed empty")
 
 
 def _now() -> str:
@@ -52,6 +116,8 @@ class ExecutionJournal:
         self.run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(3)}"
         path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = path.open("a", encoding="utf-8")
+        self._destination: dict | None = None
+        self._list_name: str | None = None
 
     def _event(self, event: str, **fields) -> None:
         record = {"event": event, "run_id": self.run_id, "at": _now(), **fields}
@@ -67,6 +133,7 @@ class ExecutionJournal:
         destination: dict,
         list_name: str,
     ) -> None:
+        self._destination, self._list_name = destination, list_name
         self._event(
             "run_start",
             target=target,
@@ -75,6 +142,29 @@ class ExecutionJournal:
             destination=destination,
             list_name=list_name,
         )
+
+    def baseline(
+        self,
+        list_id: int,
+        current: dict[str, TargetSubscriber],
+        elsewhere: dict[str, TargetSubscriber],
+    ) -> bool:
+        """Journal the destination as found, if this is still the first look
+        at it. Needs run_start (the destination identity); returns whether a
+        baseline was written."""
+        if self._destination is None or self._list_name is None:
+            return False
+        self._fh.flush()
+        prior = find_baseline(self.path, self._destination, self._list_name)
+        if prior.baseline is not None or prior.written_before:
+            return False
+        self._event(
+            "baseline",
+            list_id=list_id,
+            members={k: [s.status, s.subscription] for k, s in sorted(current.items())},
+            elsewhere={k: s.status for k, s in sorted(elsewhere.items())},
+        )
+        return True
 
     def plan(self, diff: PlanDiff) -> None:
         self._event("plan", counts=diff.counts())
