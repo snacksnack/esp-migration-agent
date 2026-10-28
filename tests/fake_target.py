@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from executor.plan import DesiredSubscriber, PlannedCampaign
 from executor.queries import evaluate_query
-from executor.target import TargetSubscriber
+from executor.target import TargetError, TargetSubscriber
 
 
 class FakeTarget:
@@ -78,4 +78,57 @@ class FakeTarget:
     def count_query(self, list_id: int, query: str) -> int:
         return sum(
             1 for s in self.subscribers.values() if evaluate_query(query, s.attribs)
+        )
+
+
+class ListAwareTarget(FakeTarget):
+    """Global records (status, name, attribs) plus per-list subscriptions -
+    the shape probed on the real targets (RC1-573, ADR-0018)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.members: dict[int, dict[str, str]] = {}  # list id -> email -> subscription
+
+    def ensure_list(self, name: str) -> int:
+        list_id = super().ensure_list(name)
+        self.members.setdefault(list_id, {})
+        return list_id
+
+    def _view(self, key: str, list_id: int | None) -> TargetSubscriber:
+        record = self.subscribers[key]
+        return record.model_copy(
+            update={
+                "subscription": self.members.get(list_id, {}).get(key, ""),
+                "list_ids": sorted(lid for lid, m in self.members.items() if key in m),
+            },
+            deep=True,
+        )
+
+    def current_subscribers(self, list_id: int) -> dict[str, TargetSubscriber]:
+        return {key: self._view(key, list_id) for key in self.members.get(list_id, {})}
+
+    def lookup_subscribers(self, emails: list[str]) -> dict[str, TargetSubscriber]:
+        return {
+            e.lower(): self._view(e.lower(), None)
+            for e in emails if e.lower() in self.subscribers
+        }
+
+    def create_subscriber(self, desired: DesiredSubscriber, list_id: int) -> None:
+        if desired.email.lower() in self.subscribers:
+            raise TargetError(f"create subscriber {desired.email}: HTTP 409 E-mail already exists")
+        super().create_subscriber(desired, list_id)
+        self.members[list_id][desired.email.lower()] = desired.subscription
+
+    def update_subscriber(self, existing, desired, list_id) -> None:
+        super().update_subscriber(existing, desired, list_id)
+        self.members[list_id][desired.email.lower()] = desired.subscription
+
+    def attach_subscriber(self, existing: TargetSubscriber, list_id: int) -> None:
+        self.write_calls += 1
+        self.members[list_id][existing.email.lower()] = "unsubscribed"
+
+    def count_query(self, list_id: int, query: str) -> int:
+        return sum(
+            1 for key in self.members.get(list_id, {})
+            if evaluate_query(query, self.subscribers[key].attribs)
         )
