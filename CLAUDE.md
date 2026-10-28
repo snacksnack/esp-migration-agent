@@ -71,7 +71,10 @@ proposes, deterministic Python validates, a human approves.
   are global on both targets, so addresses off the list are looked up
   account-wide; a protected one is `attach`ed (membership only, consent
   untouched) and updates re-send every list the record is on - never a
-  bare `lists:[id]`. Integration tests
+  bare `lists:[id]`. The first --execute journals the destination as found
+  (`baseline`, ADR-0019); reconcile `--journal` excludes pre-existing members
+  and accepts a kept conflict only with baseline evidence - suppression
+  integrity never consults it. Integration tests
   (`pytest -m integration`) read env
   from the process only, never .env; listmonk e2e runs in CI, brevo is a
   manual demo asset.

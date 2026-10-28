@@ -19,8 +19,10 @@ from pathlib import Path
 import pytest
 
 from executor.engine import execute
+from executor.journal import ExecutionJournal
 from executor.listmonk import ListmonkClient
 from executor.plan import build_plan
+from executor.reconcile import reconcile, render_markdown
 from ingest.mailchimp import load_bundle
 from mapping.gate import approve, load_approved
 from seeding.build_corpora import AUDIENCE_A, AUDIENCE_B, SYNTHETIC
@@ -45,8 +47,24 @@ def spec_for(audience: str) -> MappingSpec:
     return approve(MappingSpec.model_validate(data), approved_by="integration test")
 
 
+def journaled(plan, client, path: Path):
+    journal = ExecutionJournal(path)
+    journal.run_start(
+        target=plan.target, spec={}, source={},
+        destination=client.describe_destination(), list_name=plan.list_name,
+    )
+    summary = execute(plan, client, journal)
+    journal.close()
+    return summary
+
+
 @pytest.fixture(scope="module")
-def migrated():
+def journal_path(tmp_path_factory) -> Path:
+    return tmp_path_factory.mktemp("journal") / "execution_journal.jsonl"
+
+
+@pytest.fixture(scope="module")
+def migrated(journal_path):
     client = ListmonkClient(*(os.environ[k] for k in _ENV))
     plan_a = build_plan(
         load_bundle(MULTI / "audience_a", MULTI / "api_supplement"), spec_for(AUDIENCE_A)
@@ -54,8 +72,9 @@ def migrated():
     plan_b = build_plan(
         load_bundle(MULTI / "audience_b", MULTI / "api_supplement"), spec_for(AUDIENCE_B)
     )
-    execute(plan_a, client)
-    summary_b = execute(plan_b, client)  # pre-RC1-573: HTTP 409 on the first shared address
+    journaled(plan_a, client, journal_path)
+    # pre-RC1-573 this raised HTTP 409 on the first shared address
+    summary_b = journaled(plan_b, client, journal_path)
     truth = json.loads((MULTI / "ground_truth.json").read_text())
     return client, plan_a, plan_b, summary_b, truth
 
@@ -90,3 +109,13 @@ def test_second_audience_rerun_converges(migrated):
     client, _, plan_b, _, _ = migrated
     rerun = execute(plan_b, client)
     assert rerun.written == {}
+
+
+def test_second_audience_reconciles_against_its_baseline(migrated, journal_path):
+    """RC1-574 on the real API: the kept protections are expected deviations
+    the baseline proves, and everything else reconciles exactly."""
+    client, _, plan_b, _, truth = migrated
+    bundle_b = load_bundle(MULTI / "audience_b", MULTI / "api_supplement")
+    report = reconcile(bundle_b, spec_for(AUDIENCE_B), client, journal_path)
+    assert report.passed, render_markdown(report)
+    assert {d.email for d in report.deviations} == set(truth["overlap_consent_conflicts"])

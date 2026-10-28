@@ -1,15 +1,10 @@
-"""RC1-572: the engine against targets that are not empty and audiences that
-are not alone. Two limits are pinned here on purpose (ADR-0017):
-
-- Every audience plans into the same destination list name, so a second
-  audience lands on top of the first. The suppression invariant still holds
-  across audiences (an address unsubscribed in A stays protected when B
-  says subscribed - ADR-0013), and reconciliation FAILS, naming exactly the
-  other audience's addresses: loud, never silent.
-- Reconciliation assumes the destination list started empty. Against a
-  pre-populated target it fails, naming exactly the pre-existing addresses
-  and the kept conflicts - again precise, never silent. Baselining
-  pre-existing members is follow-up work.
+"""RC1-572: the engine against a target that is not empty (ADR-0017).
+The suppression invariant holds against a pre-populated list and the
+destination's stricter consent is kept (ADR-0013). Reconciliation WITHOUT a
+baseline still assumes the list started empty and fails precisely - naming
+the pre-existing addresses and the kept conflicts, never silent; with the
+first run's journaled baseline it passes (RC1-574, tests/test_reconcile_
+baseline.py). Two audiences are tests/test_cross_audience.py (RC1-573).
 
 FakeTarget throughout; fixture scale where it matters."""
 
