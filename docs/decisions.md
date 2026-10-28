@@ -3,7 +3,45 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
-## ADR-0015: Retries follow what a failure proves about the target (2026-10-27)
+## ADR-0016: The journal records the run; the destination binds by record, not by approval (2026-10-27)
+
+**Decision.** RC1-571 (external review finding, GPT-6 Astra #7): execution
+left no durable record - the summary printed and was gone, so "the re-run
+converges" was asserted from memory, never provable from artifacts. Every
+`--execute` run now appends to an execution journal (`executor/journal.py`,
+default `docs/execution_journal.jsonl`, `--journal` for engagements):
+JSONL, one event per line, flushed as written, so a run killed mid-write
+leaves a record that ends exactly where the run did and the resuming run
+appends to the same file.
+
+The journal records what the approval binds (spec path, content hash, source
+fingerprint, parse timezone, approver) plus the one thing the approval
+deliberately does NOT bind: destination identity (platform + host/account,
+via `describe_destination()` on every adapter - Brevo names the account, the
+host never varies). The re-review suggested hard-binding the destination at
+approval time; rejected because the destination often does not exist when the
+spec is reviewed (the engagement creates it at cutover). Recording it in the
+run artifact answers the same audit question - "what ran, against what, by
+whose sign-off" - without forcing reviewers to approve infrastructure that
+is not there yet.
+
+The journal is write-BEHIND: an event lands after its write completes, so a
+crash between the two loses at most that one event. The journal therefore
+understates, never overstates - it will never claim a write that did not
+happen - and the idempotent re-run absorbs the gap (the committed artifact
+shows exactly this: 2,836 journaled vs 2,837 landed in the interrupted run,
+and the resume skipped all 2,837). Write-ahead was rejected: a record that
+can assert un-landed writes is worse than one that can miss the last one.
+
+Division of labor: the engine journals per-write events (phase, action, key,
+`recovered: true` when an RC1-570 read-back stood in for a lost response, and
+`conflict` for addresses kept at the destination's stricter consent per
+ADR-0013); the CLI owns the run lifecycle (`run_start`, `plan`, `run_failed`
+with the last error text, `run_complete`). Dry runs journal nothing - there
+is nothing durable to record. The committed journal is a genuine record of an
+interrupted run resumed to convergence against the dev Listmonk, staged the
+same way the fixture seeds its risks: deliberately, so the artifact
+demonstrates the property it exists to prove.
 
 **Decision.** RC1-570 (external review finding, GPT-6 Astra #8): the adapters
 raised `TargetError` on the first HTTP hiccup and the only recovery was the

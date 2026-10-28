@@ -18,6 +18,9 @@ class FakeTarget:
         self.write_calls = 0
         self._next_id = 1
 
+    def describe_destination(self) -> dict[str, str]:
+        return {"platform": "fake", "host": "in-memory"}
+
     def find_list(self, name: str) -> int | None:
         return self.lists.get(name)
 

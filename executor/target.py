@@ -30,6 +30,11 @@ class TargetError(RuntimeError):
 
 
 class TargetClient(Protocol):
+    def describe_destination(self) -> dict[str, str]:
+        """Destination identity for the execution journal (RC1-571):
+        at least {"platform": ...}, plus host/account where they vary."""
+        ...
+
     def find_list(self, name: str) -> int | None:
         """Find the list WITHOUT creating it; None when absent. The only
         list lookup read paths (dry run, reconcile) may use (RC1-564)."""
@@ -65,6 +70,9 @@ class TargetClient(Protocol):
 class OfflineTarget:
     """Stand-in when no target is configured: reports an empty target so the
     dry-run diff renders offline, and refuses every write loudly."""
+
+    def describe_destination(self) -> dict[str, str]:
+        return {"platform": "offline"}
 
     def find_list(self, name: str) -> int | None:
         return None

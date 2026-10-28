@@ -63,7 +63,11 @@ proposes, deterministic Python validates, a human approves.
   reversed on read. Adapter HTTP goes through `executor/retries.py`
   (ADR-0015): bounded retries for provably-unprocessed failures, read-back
   before replaying an ambiguous write, fatal statuses raise immediately -
-  never blanket-retry a non-idempotent write. Integration tests
+  never blanket-retry a non-idempotent write. Every --execute run appends to
+  the execution journal (`executor/journal.py`, ADR-0016, default
+  `docs/execution_journal.jsonl`): spec provenance, destination identity,
+  every completed write, conflicts, failures, summary - dry runs journal
+  nothing. Integration tests
   (`pytest -m integration`) read env
   from the process only, never .env; listmonk e2e runs in CI, brevo is a
   manual demo asset.
