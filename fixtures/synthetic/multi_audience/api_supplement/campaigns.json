@@ -10,7 +10,8 @@
   },
   "recipients": {
    "list_id": "572000000a",
-   "recipient_count": 258
+   "recipient_count": 258,
+   "list_name": "Retail customers"
   },
   "content": {
    "html": "<p>Hi *|FNAME|*</p>"
@@ -27,7 +28,8 @@
   },
   "recipients": {
    "list_id": "572000000b",
-   "recipient_count": 279
+   "recipient_count": 279,
+   "list_name": "Wholesale partners"
   },
   "content": {
    "html": "<p>Hi *|FNAME|*</p>"

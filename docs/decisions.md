@@ -3,6 +3,51 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0018: One audience per spec, per list; contacts are global (2026-10-27)
+
+**Decision.** RC1-573 (follow-up to ADR-0017): each Mailchimp audience is
+proposed, approved, and migrated on its own into its own destination list.
+The spec records `source_audience` as provenance (bound by the approval hash;
+unset is omitted, so pre-RC1-573 approvals keep their hash and their list
+name `Imported audience (mailchimp)`). Propose resolves the audience from the
+supplement's campaigns (`--audience`; inferred only when there is exactly
+one); the plan refuses a spec without one when the supplement spans several,
+or one the supplement never mentions, and scopes campaigns to it. The list is
+`<audience> (imported from <source>)`.
+
+**Probed against a live Listmonk (not assumed).** Contacts and their status
+are global; subscriptions are per list. (1) Creating an address that exists
+on any list answers 409 "E-mail already exists" - the pre-RC1-573 engine,
+which only read the destination list, failed the second audience on its
+first shared address (reproduced on the real API). (2) `PUT /subscribers/{id}`
+REPLACES list memberships: the old update sent `lists:[this list]` and
+silently dropped every other membership, a pre-populated target included.
+(3) Bulk `PUT /subscribers/lists` action add attaches a membership without
+touching the global status. (4) A PUT listing an existing membership leaves
+that subscription as it is. (5) The subscriber `query` is spliced after the
+list filter without parentheses: a segment `A OR B` counted B across the
+whole account. Found by the e2e once a second list existed; the adapter now
+wraps every segment query. Brevo's create is an upsert whose blacklist flag
+would have un-suppressed a contact another audience suppressed.
+
+**Mechanics.** Addresses not on the destination list are looked up account-
+wide (`lookup_subscribers`; batched `IN` on Listmonk, paged walk on Brevo).
+Found and protected while this spec wants it subscribable: new diff action
+`attach` - membership only, consent untouched (Listmonk subscription
+"unsubscribed", Brevo list add without the blacklist flag), reported as a
+conflict like ADR-0013. Otherwise `update`, which re-sends every list the
+record is on. Dry-run does the same lookup, so pending attaches show as
+writes. A rerun converges: attached records are members, ordinary conflicts.
+
+**Consequences.** Order matters in one direction only. A later audience's
+suppression applies account-wide on Listmonk (the blocklist is global): an
+address unsubscribed from A stops receiving B's mail too. That is the safe
+direction; a reviewer who wants B to stay mailable maps unsubscribed to the
+per-list `unsubscribed` label instead - a spec decision, not an executor
+one. Reconciliation of the second audience still counts the kept
+protections as checksum mismatches; teaching it expected deviations is
+RC1-574.
+
 ## ADR-0017: Breadth corpora are synthetic, built, and pinned to the genuine capture's shape (2026-10-27)
 
 **Decision.** RC1-572 (external review finding, GPT-6 Astra #12): the engine

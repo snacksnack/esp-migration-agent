@@ -10,7 +10,8 @@
   },
   "recipients": {
    "list_id": "5720000001",
-   "recipient_count": 374
+   "recipient_count": 374,
+   "list_name": "Loyalty members"
   },
   "content": {
    "html": "<p>*|IF:FNAME|*Hi *|FNAME|*,*|ELSE:|*Hi there,*|END:IF|*</p><p>Your tier: *|LOYALTY_TIER|*. Points as of *|DATE:Y|*: *|POINTS|*.</p><p><a href=\"*|UNSUB|*\">Unsubscribe</a></p>"

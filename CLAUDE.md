@@ -67,7 +67,11 @@ proposes, deterministic Python validates, a human approves.
   the execution journal (`executor/journal.py`, ADR-0016, default
   `docs/execution_journal.jsonl`): spec provenance, destination identity,
   every completed write, conflicts, failures, summary - dry runs journal
-  nothing. Integration tests
+  nothing. One audience per spec, per destination list (ADR-0018): contacts
+  are global on both targets, so addresses off the list are looked up
+  account-wide; a protected one is `attach`ed (membership only, consent
+  untouched) and updates re-send every list the record is on - never a
+  bare `lists:[id]`. Integration tests
   (`pytest -m integration`) read env
   from the process only, never .env; listmonk e2e runs in CI, brevo is a
   manual demo asset.
