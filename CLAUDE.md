@@ -87,6 +87,10 @@ proposes, deterministic Python validates, a human approves.
 - `seeding/generator.py` - pure, seeded subscriber generator returning records
   plus expected aggregates (the ground truth for RC1-544).
 - `seeding/mailchimp_seeder.py` - API uploader; needs `ESP_MAILCHIMP_API_KEY`.
+- `seeding/bundle_writer.py` + `seeding/build_corpora.py` - synthetic export
+  bundles pinned to the genuine capture's shape (ADR-0017); the RC1-572 breadth
+  corpora under `fixtures/synthetic/` are BUILT, never hand-edited (freshness
+  test). Malformed exports are built per test, never committed.
 - `fixtures/` - synthetic Mailchimp export bundle + ground_truth.json (see
   fixtures/README.md for the capture procedure; the account export is
   UI-triggered, there is no API for it).

@@ -77,17 +77,26 @@ CASES: tuple[Case, ...] = (
         expect=tuple(c for c in _GATED if c != "seeded-ambiguities-flagged"),
         tags=("mapping-quality", "precision"),
     ),
+    Case(
+        id="custom-fields",
+        # RC1-572 breadth corpus: a custom merge field with mixed formats is
+        # a new ambiguity class; its uniform twin keeps precision honest.
+        input={"payload": "custom_fields_listmonk.json"},
+        expect=_GATED,
+        tags=("mapping-quality", "recall", "breadth"),
+    ),
 )
 
-#: Measured 2026-10-26 on claude-opus-5-5: the full two-case suite cost
-#: $0.235 and ran 95s (fixture 51s, clean 43s). Ceiling at roughly 2x the
-#: measured run, so a payload or prompt that doubles the spend is a finding
-#: before it is a bill.
+#: Measured 2026-10-27 on claude-opus-5-5 after RC1-572 added the third
+#: case: the full suite cost $0.431 and ran 179s (fixture 56s, clean 51s,
+#: custom-fields 72s). Ceiling at roughly 2x the measured run, so a payload
+#: or prompt that doubles the spend is a finding before it is a bill. (The
+#: two-case baseline was $0.235 / 95s on 2026-10-26.)
 CEILING = Ceiling(
     subject=NAME,
-    max_cost_usd=Decimal("0.50"),
-    max_latency_ms=300_000,
-    note="~2x the measured 2026-10-26 baseline: $0.235 / 95s for both cases on claude-opus-5-5",
+    max_cost_usd=Decimal("0.90"),
+    max_latency_ms=360_000,
+    note="~2x the measured 2026-10-27 baseline: $0.431 / 179s for three cases on claude-opus-5-5",
 )
 
 

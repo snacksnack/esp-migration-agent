@@ -1,0 +1,19 @@
+[
+ {
+  "id": "cf00000001",
+  "status": "save",
+  "type": "regular",
+  "settings": {
+   "title": "Loyalty update",
+   "subject_line": "Your loyalty status",
+   "from_name": "Synthetic Dispatch"
+  },
+  "recipients": {
+   "list_id": "5720000001",
+   "recipient_count": 374
+  },
+  "content": {
+   "html": "<p>*|IF:FNAME|*Hi *|FNAME|*,*|ELSE:|*Hi there,*|END:IF|*</p><p>Your tier: *|LOYALTY_TIER|*. Points as of *|DATE:Y|*: *|POINTS|*.</p><p><a href=\"*|UNSUB|*\">Unsubscribe</a></p>"
+  }
+ }
+]

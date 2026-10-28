@@ -44,6 +44,37 @@ REQUIRED_COLUMNS = [
     "CONFIRM_TIME",
 ]
 
+# System/metadata columns Mailchimp ships in every audience export: not merge
+# fields, never migration data. Anything OUTSIDE this set and REQUIRED_COLUMNS
+# that carries data is a custom merge field the fixed parser cannot migrate -
+# collected by extra_merge_columns() so it surfaces instead of silently
+# dropping (RC1-572).
+METADATA_COLUMNS = frozenset(
+    {
+        "OPTIN_IP",
+        "CONFIRM_IP",
+        "GMTOFF",
+        "DSTOFF",
+        "TIMEZONE",
+        "CC",
+        "REGION",
+        "LAST_CHANGED",
+        "LEID",
+        "EUID",
+        "NOTES",
+        "TAGS",
+        "SOURCE",
+        "UNSUB_TIME",
+        "UNSUB_CAMPAIGN_TITLE",
+        "UNSUB_CAMPAIGN_ID",
+        "UNSUB_REASON",
+        "UNSUB_REASON_OTHER",
+    }
+)
+
+EXTRA_SAMPLES_PER_COLUMN = 10
+EXTRA_DISTINCT_CAP = 1000  # bounds memory on high-cardinality columns
+
 CSV_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 MERGE_TAG_RE = re.compile(r"\*\|([A-Z0-9_:]+)\|\*")
 
@@ -73,49 +104,113 @@ def _parse_time(
 def _parse_member_row(
     row: dict[str, str], bucket: ConsentBucket, path: Path, row_num: int, tz: ZoneInfo
 ) -> SubscriberRecord:
+    # Every export row carries a cell for every header column, empty or not.
+    # DictReader marks a short row's missing cells None and files surplus
+    # cells under the None key: either shape is a truncated or malformed
+    # row, even when every REQUIRED field happens to be intact (RC1-572).
+    if None in row:
+        raise IngestError(
+            f"{path.name} row {row_num}: more cells than the header has columns"
+        )
+    missing = sum(1 for value in row.values() if value is None)
+    if missing:
+        raise IngestError(
+            f"{path.name} row {row_num}: {missing} trailing column(s) missing "
+            "(truncated or malformed row)"
+        )
     email = (row.get("Email Address") or "").strip()
     if not email:
         raise IngestError(f"{path.name} row {row_num}: empty Email Address")
-    rating_raw = row.get("MEMBER_RATING", "")
+    rating_raw = row.get("MEMBER_RATING") or ""
     try:
         rating = int(rating_raw)
     except ValueError as exc:
         raise IngestError(f"{path.name} row {row_num}: bad MEMBER_RATING {rating_raw!r}") from exc
-    return SubscriberRecord(
-        email=email.lower(),
-        bucket=bucket,
-        fname=row["First Name"],
-        lname=row["Last Name"],
-        zip_code=row["Zip code"],
-        state=row["State"],
-        last_purchase=row["Last purchase"],
-        member_rating=rating,
-        optin_time=_parse_time(row["OPTIN_TIME"], "OPTIN_TIME", path, row_num, tz),
-        confirm_time=_parse_time(row["CONFIRM_TIME"], "CONFIRM_TIME", path, row_num, tz),
-        unsub_time=_parse_time(row.get("UNSUB_TIME", ""), "UNSUB_TIME", path, row_num, tz),
-    )
+    try:
+        return SubscriberRecord(
+            email=email.lower(),
+            bucket=bucket,
+            fname=row["First Name"],
+            lname=row["Last Name"],
+            zip_code=row["Zip code"],
+            state=row["State"],
+            last_purchase=row["Last purchase"],
+            member_rating=rating,
+            optin_time=_parse_time(row["OPTIN_TIME"], "OPTIN_TIME", path, row_num, tz),
+            confirm_time=_parse_time(row["CONFIRM_TIME"], "CONFIRM_TIME", path, row_num, tz),
+            unsub_time=_parse_time(row.get("UNSUB_TIME") or "", "UNSUB_TIME", path, row_num, tz),
+        )
+    except ValidationError as exc:
+        # A truncated row leaves trailing cells as None; name the row rather
+        # than leaking a pydantic stack (RC1-572).
+        raise IngestError(f"{path.name} row {row_num}: incomplete or malformed row: {exc}") from exc
 
 
 def load_audience_csv(
     path: Path, bucket: ConsentBucket, account_tz: str = DEFAULT_ACCOUNT_TZ
 ) -> list[SubscriberRecord]:
     tz = ZoneInfo(account_tz)
-    with path.open(newline="") as f:
-        reader = csv.DictReader(f)
-        missing = [c for c in REQUIRED_COLUMNS if c not in (reader.fieldnames or [])]
-        if missing:
-            raise IngestError(f"{path.name}: missing expected columns {missing}")
-        return [
-            _parse_member_row(row, bucket, path, row_num, tz)
-            for row_num, row in enumerate(reader, 2)
-        ]
+    try:
+        with path.open(newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            missing = [c for c in REQUIRED_COLUMNS if c not in (reader.fieldnames or [])]
+            if missing:
+                raise IngestError(f"{path.name}: missing expected columns {missing}")
+            return [
+                _parse_member_row(row, bucket, path, row_num, tz)
+                for row_num, row in enumerate(reader, 2)
+            ]
+    except UnicodeDecodeError as exc:
+        raise IngestError(
+            f"{path.name}: not valid UTF-8 (wrong encoding, or a truncated/"
+            f"corrupted export): {exc}"
+        ) from exc
+    except csv.Error as exc:
+        raise IngestError(f"{path.name}: malformed CSV: {exc}") from exc
+
+
+def extra_merge_columns(paths: list[Path]) -> dict[str, list[str]]:
+    """Custom merge-field columns outside the standard export set that carry
+    data, with the first EXTRA_SAMPLES_PER_COLUMN distinct raw values in sorted
+    order (deterministic whatever the row order). The fixed
+    parser cannot migrate these; they must surface, never silently drop
+    (RC1-572). Mailchimp's standard-but-empty audience fields (Address,
+    Birthday, ...) stay invisible until a value appears in one."""
+    known = set(REQUIRED_COLUMNS) | METADATA_COLUMNS
+    distinct: dict[str, set[str]] = {}
+    for path in paths:
+        try:
+            with path.open(newline="", encoding="utf-8-sig") as f:
+                reader = csv.DictReader(f)
+                candidates = [c for c in (reader.fieldnames or []) if c not in known]
+                if not candidates:
+                    continue
+                for row in reader:
+                    for column in candidates:
+                        value = row.get(column) or ""
+                        if not value.strip():
+                            continue
+                        # Raw, not stripped: padding is one of the formats a
+                        # reviewer (and the proposer) has to see.
+                        seen = distinct.setdefault(column, set())
+                        if len(seen) < EXTRA_DISTINCT_CAP:
+                            seen.add(value)
+        except (UnicodeDecodeError, csv.Error) as exc:
+            raise IngestError(f"{path.name}: unreadable while scanning columns: {exc}") from exc
+    return {
+        column: sorted(values)[:EXTRA_SAMPLES_PER_COLUMN]
+        for column, values in sorted(distinct.items())
+    }
 
 
 def load_audience_dir(
     audience_dir: Path, account_tz: str = DEFAULT_ACCOUNT_TZ
-) -> dict[ConsentBucket, list[SubscriberRecord]]:
-    """Load the three per-consent-bucket CSVs a Mailchimp audience export ships."""
+) -> tuple[dict[ConsentBucket, list[SubscriberRecord]], dict[str, list[str]]]:
+    """Load the three per-consent-bucket CSVs a Mailchimp audience export
+    ships, plus any data-bearing custom merge columns the fixed parser
+    cannot migrate (RC1-572)."""
     members: dict[ConsentBucket, list[SubscriberRecord]] = {}
+    paths: list[Path] = []
     for bucket in ConsentBucket:
         matches = sorted(audience_dir.glob(f"{bucket.value}_*.csv"))
         if len(matches) != 1:
@@ -126,8 +221,9 @@ def load_audience_dir(
         members[bucket] = load_audience_csv(matches[0], bucket, account_tz)
         if not members[bucket]:
             raise IngestError(f"{matches[0].name}: no member rows")
+        paths.append(matches[0])
     _refuse_duplicate_emails(members)
-    return members
+    return members, extra_merge_columns(paths)
 
 
 def _refuse_duplicate_emails(
@@ -242,9 +338,11 @@ def bundle_fingerprint(audience_dir: Path, supplement_dir: Path) -> str:
 def load_bundle(
     audience_dir: Path, supplement_dir: Path, account_tz: str = DEFAULT_ACCOUNT_TZ
 ) -> MailchimpBundle:
+    members, extra_columns = load_audience_dir(audience_dir, account_tz)
     return MailchimpBundle(
-        members=load_audience_dir(audience_dir, account_tz),
+        members=members,
         segments=load_segments(supplement_dir),
         templates=load_templates(supplement_dir),
         campaigns=load_campaigns(supplement_dir),
+        extra_columns=extra_columns,
     )

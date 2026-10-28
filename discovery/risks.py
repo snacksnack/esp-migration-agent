@@ -15,7 +15,7 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 from discovery.inventory import Inventory
-from ingest.models import MailchimpBundle
+from ingest.models import ConsentBucket, MailchimpBundle
 
 # What each supported target's segmentation can express. A condition type
 # outside the set is an unsupported-feature risk, surfaced at discovery so it
@@ -77,6 +77,8 @@ def build_risk_register(
                     ),
                 )
             )
+
+    risks += _breadth_risks(bundle, inventory)
 
     # Known Mailchimp export gap, observed while freezing the fixture: the
     # audience export ships no file for status=pending (fixtures/README.md).
@@ -173,3 +175,84 @@ def build_risk_register(
         )
 
     return sort_risks(risks)
+
+
+def _breadth_risks(bundle: MailchimpBundle, inventory: Inventory) -> list[Risk]:
+    """Limits the RC1-572 breadth corpora expose. Each is surfaced at
+    discovery so it prices into the engagement instead of failing at cutover
+    (ADR-0017)."""
+    risks: list[Risk] = []
+
+    if bundle.extra_columns:
+        columns = ", ".join(bundle.extra_columns)
+        risks.append(
+            Risk(
+                code="unmigrated_custom_fields",
+                severity=Severity.HIGH,
+                title="Custom merge fields the executor cannot migrate yet",
+                detail=(
+                    f"Data-bearing column(s) outside the standard export set: {columns}. "
+                    "They reach the mapping proposal so a reviewer decides each one, but "
+                    "the executor reads a fixed field set and refuses a spec that maps "
+                    "them - extending the parser is a scoped engagement item."
+                ),
+                count=len(bundle.extra_columns),
+            )
+        )
+
+    list_ids = sorted({c.list_id for c in bundle.campaigns})
+    if len(list_ids) > 1:
+        risks.append(
+            Risk(
+                code="multiple_audiences",
+                severity=Severity.HIGH,
+                title="The account has more than one audience",
+                detail=(
+                    f"Campaigns target {len(list_ids)} audiences ({', '.join(list_ids)}); "
+                    "an audience export carries one. Each audience needs its own export, "
+                    "review, and destination list - migrating two into one list merges "
+                    "them, and an address in both may carry different consent in each."
+                ),
+                count=len(list_ids),
+            )
+        )
+    elif list_ids:
+        # One audience: an unsegmented campaign's recipient count is the
+        # source's own count of mailable members. A shortfall in the export
+        # (a row-boundary truncation parses cleanly) shows up only here.
+        exported = len(bundle.members.get(ConsentBucket.SUBSCRIBED, []))
+        for c in bundle.campaigns:
+            if c.saved_segment_id is None and c.recipient_count != exported:
+                risks.append(
+                    Risk(
+                        code="export_row_count_mismatch",
+                        severity=Severity.HIGH,
+                        title="Exported subscribers disagree with the source's own count",
+                        detail=(
+                            f"Campaign {c.title!r} reaches {c.recipient_count:,} members "
+                            f"but the export carries {exported:,} subscribed rows. A "
+                            "truncated or partial export parses cleanly; re-export and "
+                            "compare before proposing anything."
+                        ),
+                        count=abs(c.recipient_count - exported),
+                    )
+                )
+                break
+
+    complex_tags = [t for t in inventory.merge_tags_in_use if ":" in t]
+    if complex_tags:
+        risks.append(
+            Risk(
+                code="complex_merge_tags",
+                severity=Severity.MEDIUM,
+                title="Conditional or function merge tags in campaign content",
+                detail=(
+                    f"Tags {', '.join(complex_tags)} are logic, not field lookups. Each "
+                    "needs a reviewed translation into the target's template language; "
+                    "the plan refuses any campaign with an untranslated tag."
+                ),
+                count=len(complex_tags),
+            )
+        )
+
+    return risks
