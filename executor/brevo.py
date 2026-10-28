@@ -41,6 +41,7 @@ from executor.target import TargetError, TargetSubscriber
 
 BREVO_API = "https://api.brevo.com/v3"
 PAGE_SIZE = 500  # Brevo's max `limit` on the list-contacts endpoint
+ACCOUNT_PAGE_SIZE = 1000  # Brevo's max `limit` on GET /contacts
 LOOKUP_PAGE_SIZE = 50  # Brevo's max `limit` on the folders/lists endpoints
 CONSENT_ATTR = "ESP_CONSENT"
 FOLDER_NAME = "ESP migration"
@@ -326,6 +327,41 @@ class BrevoClient:
             status=status,
             subscription=subscription,
             attribs=raw_attrs,
+            list_ids=sorted(row.get("listIds") or []),
+        )
+
+    def lookup_subscribers(self, emails: list[str]) -> dict[str, TargetSubscriber]:
+        """Brevo contacts are account-global and consent is global too, so a
+        contact on no migrated list can still be blacklisted. One pass over
+        the account's contacts (no batch-by-email endpoint)."""
+        wanted = {e.lower() for e in emails}
+        out: dict[str, TargetSubscriber] = {}
+        if not wanted:
+            return out
+        offset = 0
+        while True:
+            data = self._call(
+                "GET", "/contacts", "list all contacts",
+                params={"limit": ACCOUNT_PAGE_SIZE, "offset": offset},
+            )
+            rows = data.get("contacts") or []
+            for row in rows:
+                if row.get("email", "").lower() in wanted:
+                    sub = self._normalize(row)
+                    out[sub.email.lower()] = sub
+            offset += ACCOUNT_PAGE_SIZE
+            if offset >= data.get("count", 0) or not rows:
+                return out
+
+    def attach_subscriber(self, existing: TargetSubscriber, list_id: int) -> None:
+        # Membership only: this endpoint never touches emailBlacklisted, so
+        # an existing blacklist survives being added to the list (ADR-0018).
+        self._call(
+            "POST",
+            f"/contacts/lists/{list_id}/contacts/add",
+            f"attach {existing.email}",
+            replay_safe=True,  # adding a member twice is a no-op
+            json={"emails": [existing.email]},
         )
 
     def current_subscribers(self, list_id: int) -> dict[str, TargetSubscriber]:

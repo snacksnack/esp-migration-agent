@@ -15,7 +15,6 @@ FakeTarget throughout; fixture scale where it matters."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -26,11 +25,9 @@ from executor.reconcile import build_reconciliation
 from executor.target import TargetSubscriber
 from ingest.mailchimp import load_bundle
 from mapping.gate import load_approved
-from seeding.build_corpora import SYNTHETIC
 from tests.fake_target import FakeTarget
 
 APPROVED = Path("specs/approved/mailchimp_to_listmonk.yaml")
-MULTI = SYNTHETIC / "multi_audience"
 
 
 @pytest.fixture(scope="module")
@@ -45,52 +42,6 @@ def _seed(target: FakeTarget, d: DesiredSubscriber, status: str, subscription: s
         subscription=subscription, attribs=dict(d.attribs if attribs is None else attribs),
     )
     target._next_id += 1
-
-
-# --- two audiences, one destination ------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def audiences(spec):
-    truth = json.loads((MULTI / "ground_truth.json").read_text())
-    bundle_a = load_bundle(MULTI / "audience_a", MULTI / "api_supplement")
-    bundle_b = load_bundle(MULTI / "audience_b", MULTI / "api_supplement")
-    return truth, bundle_a, bundle_b, build_plan(bundle_a, spec), build_plan(bundle_b, spec)
-
-
-def test_every_audience_plans_into_the_same_list(audiences):
-    *_, plan_a, plan_b = audiences
-    assert plan_a.list_name == plan_b.list_name  # the limit, pinned
-
-
-def test_second_audience_never_downgrades_the_first_audiences_suppressions(audiences):
-    truth, _, _, plan_a, plan_b = audiences
-    conflicted = set(truth["overlap_consent_conflicts"])
-    target = FakeTarget()
-    execute(plan_a, target)
-    summary_b = execute(plan_b, target)
-
-    # Unsubscribed in A, subscribed in B: kept protected and reported.
-    assert set(summary_b.conflicts) == conflicted
-    for email in conflicted:
-        assert target.subscribers[email].status == "blocklisted"
-    # Same consent in both: B finds them already converged, writes nothing.
-    for email in truth["overlap_same_consent"]:
-        assert target.subscribers[email].status == "enabled"
-
-
-def test_reconciling_the_second_audience_names_the_first(audiences, spec):
-    truth, bundle_a, bundle_b, plan_a, plan_b = audiences
-    target = FakeTarget()
-    execute(plan_a, target)
-    summary = execute(plan_b, target)
-    report = build_reconciliation(plan_b, spec, bundle_b, target, summary.list_id)
-
-    a_only = {m.email for m in bundle_a.all_members} - {m.email for m in bundle_b.all_members}
-    assert not report.passed
-    assert set(report.membership.unexpected) == a_only
-    assert report.membership.missing == []
-    assert report.suppression.violations == []  # B's own suppressions all landed
 
 
 # --- a destination that already holds data -------------------------------------------

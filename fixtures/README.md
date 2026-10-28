@@ -125,7 +125,10 @@ fails if the committed files differ from a fresh build.
 - `synthetic/multi_audience/` - two audiences from one account
   (`audience_a/`, `audience_b/`) sharing one supplement whose campaigns
   target both. 15 addresses are unsubscribed in A and subscribed in B (the
-  cross-audience consent conflict); 20 more are subscribed in both.
+  cross-audience consent conflict); 20 more are subscribed in both. The
+  campaigns carry `recipients.list_name` ("Retail customers" for A,
+  "Wholesale partners" for B) so each audience is proposed with
+  `--audience` and migrated into its own list (RC1-573, ADR-0018).
 
 Each corpus carries its own `ground_truth.json` (exported counts, seeded
 ambiguities, overlaps, expected risk codes). Malformed exports are built per

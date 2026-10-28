@@ -7,6 +7,10 @@
   "subscribed": 279,
   "unsubscribed": 28
  },
+ "audience_names": {
+  "audience_a": "Retail customers",
+  "audience_b": "Wholesale partners"
+ },
  "corpus": "multi_audience",
  "expected_risk_codes": [
   "multiple_audiences"
