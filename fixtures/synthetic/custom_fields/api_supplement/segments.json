@@ -1,0 +1,19 @@
+[
+ {
+  "id": 57201,
+  "name": "New York members",
+  "type": "saved",
+  "options": {
+   "match": "all",
+   "conditions": [
+    {
+     "condition_type": "TextMerge",
+     "field": "STATE",
+     "op": "is",
+     "value": "NY"
+    }
+   ]
+  },
+  "member_count": 123
+ }
+]

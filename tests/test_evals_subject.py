@@ -21,6 +21,7 @@ TARGETS = {
     "CONFIRM_TIME": ("attribs.confirm_time", "ISO 8601 UTC string."),
     "ZIP": ("attribs.zip", "Copy as-is (uniform 5-digit)."),
     "LASTPURCH": ("attribs.lastpurch", "Copy as-is (uniform ISO)."),
+    "POINTS": ("attribs.points", "Parse as integer."),
 }
 
 
@@ -183,3 +184,40 @@ def test_judgment_calls_are_advisory_only():
 
 def test_cases_have_expectations():
     assert {c.id for c in subject.CASES} == set(expectations.BY_CASE)
+
+
+# --- RC1-572: the custom-fields breadth case -------------------------------------
+
+
+def test_compliant_custom_fields_draft_passes_everything():
+    results, obs = scored("custom-fields", compliant_output("custom-fields"))
+    gated = [r for r in results if not r.advisory]
+    assert all(r.passed for r in gated), [r.detail for r in gated if not r.passed]
+    assert obs["flag_recall"] == 1.0
+    assert obs["flag_precision"] == 1.0
+
+
+def test_normalizing_a_mixed_custom_field_fails_recall():
+    """Proposing a lowercase-and-trim rule for LOYALTY_TIER decides that
+    'gold', 'GOLD ' and '2' are tiers the customer never said they were."""
+    output = compliant_output("custom-fields")
+    tier = next(f for f in output["field_mappings"] if f["source_field"] == "LOYALTY_TIER")
+    tier.update(
+        status="proposed", open_question=None,
+        target_field="attribs.loyalty_tier", transform="Lowercase and trim.",
+    )
+    results, obs = scored("custom-fields", output)
+    named = by_name(results)
+    assert not named["seeded-ambiguities-flagged"].passed
+    assert "LOYALTY_TIER" in named["seeded-ambiguities-flagged"].detail
+    assert obs["flag_recall"] == pytest.approx(2 / 3)
+
+
+def test_flagging_the_uniform_custom_field_fails_precision():
+    output = compliant_output("custom-fields")
+    points = next(f for f in output["field_mappings"] if f["source_field"] == "POINTS")
+    points.update(status="flagged", open_question="what are points?", target_field=None)
+    results, _ = scored("custom-fields", output)
+    named = by_name(results)
+    assert not named["unambiguous-not-flagged"].passed
+    assert "POINTS" in named["unambiguous-not-flagged"].detail

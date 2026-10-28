@@ -83,6 +83,11 @@ class MailchimpBundle(BaseModel):
     segments: list[SegmentDef]
     templates: list[TemplateMeta]
     campaigns: list[CampaignMeta]
+    # Custom merge-field columns outside the standard export set that CARRY
+    # DATA (RC1-572): column -> a few distinct sample values. The parser does
+    # not migrate them - they surface here so discovery risks them and the
+    # proposer must flag or map them, never silently drop them.
+    extra_columns: dict[str, list[str]] = {}
 
     @property
     def all_members(self) -> list[SubscriberRecord]:

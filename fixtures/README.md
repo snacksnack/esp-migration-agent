@@ -106,3 +106,27 @@ was re-captured (saved segments do not alter members).
 - **Unclear consent column:** the `nonsubscribed` bucket (88 members) has no
   self-evident equivalent in the target's consent model; mapping it is a
   judgment call about marketing-consent semantics.
+
+## Synthetic breadth corpora (RC1-572, ADR-0017)
+
+`synthetic/` holds corpora rendered from `seeding/generator.py` by
+`seeding/bundle_writer.py` - **not** live captures. The writer is pinned to
+the genuine capture above (header-for-header per bucket, account-timezone
+timestamps, pending members omitted), so these exercise the same parser the
+real export does. Never edit them by hand: change `seeding/build_corpora.py`
+and run `uv run python -m seeding.build_corpora`; `tests/test_corpora.py`
+fails if the committed files differ from a fresh build.
+
+- `synthetic/custom_fields/` - one audience (374 / 33 / 14 exported) with two
+  custom merge fields beyond the standard nine: `LOYALTY_TIER` (mixed
+  casings, trailing padding, numeric tiers - a seeded ambiguity) and
+  `POINTS` (uniform integers), plus a campaign using conditional and
+  function merge tags (`IF:`/`ELSE:`/`END:IF`, `DATE:`).
+- `synthetic/multi_audience/` - two audiences from one account
+  (`audience_a/`, `audience_b/`) sharing one supplement whose campaigns
+  target both. 15 addresses are unsubscribed in A and subscribed in B (the
+  cross-audience consent conflict); 20 more are subscribed in both.
+
+Each corpus carries its own `ground_truth.json` (exported counts, seeded
+ambiguities, overlaps, expected risk codes). Malformed exports are built per
+test from these (`tests/test_malformed_exports.py`) and never committed.
