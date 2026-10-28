@@ -78,6 +78,13 @@ proposes, deterministic Python validates, a human approves.
   (`pytest -m integration`) read env
   from the process only, never .env; listmonk e2e runs in CI, brevo is a
   manual demo asset.
+- Playbook commands (RC1-557, docs/playbook.md): `executor.run
+  --verify-convergence` (read-only re-diff after the run, journaled; exit 1
+  if a second pass would write), `executor.reconcile` is schedulable (exit
+  0 PASS / 1 FAIL / 2 could not run, verdict as the last line, `--history`
+  JSONL), and `discovery.freeze_diff` diffs the freeze-window export against
+  the reviewed one: data-only writes a rebound DRAFT for the spec owner to
+  re-approve, structural writes nothing (re-propose).
 - `scripts/demo.sh` + `docs/demo.md` - the recorded two-minute demo arc.
 - `telemetry/` - LLM Obs tracing + esp_migration.* run metrics (ADR-0008).
   Decoration by contract: no ddtrace (`uv sync --group obs`) or no DD_API_KEY

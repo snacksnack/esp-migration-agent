@@ -3,6 +3,40 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0020: Playbook toil becomes commands; the human gates stay human (2026-10-28)
+
+**Decision.** RC1-557: the three mechanical steps the playbook left to the
+operator are commands. What stays manual is unchanged by design: export
+capture (Mailchimp has no export API) and the three human gates (spec
+sign-off, dry-run review, reconciliation go/no-go).
+
+- **Convergence** (`executor.run --verify-convergence`) is a READ-ONLY
+  re-diff after the run, not a second execute. It proves the same thing - a
+  second pass would make exactly the writes the diff lists - without ever
+  writing to prove it. Exit 1 lists the pending writes, and the journal
+  records a `convergence` event either way. On a dry run it checks the
+  target as it stands.
+- **Parallel run**: `executor.reconcile` already exited non-zero on FAIL;
+  it now separates FAIL (1) from could-not-run (2), ends with a one-line
+  verdict, and appends `--history` JSONL. Scheduling is cron or an Actions
+  `schedule` job (documented), not a `--watch` loop: a long-lived process
+  dies silently, while a scheduler that misses a run is visible.
+- **Freeze-start diff** (`discovery.freeze_diff`): the approval binds the
+  exact export files (ADR-0014), so the playbook's "re-run the executor
+  against the fresh export" could never run under the old approval - the
+  gate refused it. The command makes that explicit. It verifies the
+  reviewed export against the approval, then diffs the fresh one. A
+  data-only delta (members joined, left, or changed consent) gets a DRAFT
+  of the same spec bound to the fresh export, which the spec owner re-signs
+  with `approve`. A structural delta (merge-field columns, segments,
+  campaigns, audiences, or a spec that no longer builds a plan) writes
+  nothing and exits 1: re-propose.
+
+**Why not re-approve automatically for data-only deltas.** The signature
+means a named person saw what they approved. A freeze-window delta can
+carry consent changes (re-subscribes, new suppressions) the owner should
+see; the command makes re-signing cheap rather than optional.
+
 ## ADR-0019: Reconcile against the destination as the first run found it (2026-10-27)
 
 **Decision.** RC1-574 (follow-up to ADR-0017): reconciliation no longer

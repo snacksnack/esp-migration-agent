@@ -22,6 +22,12 @@ reported on its own and not a failure. Without a baseline the destination is
 assumed empty, as before. Suppression integrity never consults the baseline.
 
 Usage: uv run python -m executor.reconcile --spec specs/approved/<spec>.yaml
+
+Parallel run (RC1-557): built to be scheduled daily. Exit 0 PASS, 1 FAIL,
+2 could not reconcile (gate, ingest, or target error) - a scheduler can tell
+a failed check from a broken run. The last line printed is the one-line
+verdict, and --history appends one JSONL record per run so the window's
+trend is a file, not a memory.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ import hashlib
 import json
 import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -46,9 +53,9 @@ from executor.plan import (
 )
 from executor.queries import QueryNotEvaluatable, evaluate_query
 from executor.target import TargetClient, TargetError, TargetSubscriber
-from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
+from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, IngestError, load_bundle
 from ingest.models import MailchimpBundle
-from mapping.gate import load_approved, verify_source
+from mapping.gate import GateError, load_approved, verify_source
 from specs.model import MappingSpec
 from telemetry import count, stage
 
@@ -160,16 +167,24 @@ class ReconciliationReport(BaseModel):
     downgrades: list[str] = []
 
     @property
+    def failing(self) -> list[str]:
+        """Names of the checks that failed, in report order."""
+        checks = {
+            "consent_counts": all(c.ok for c in self.consent_counts),
+            "suppression": not self.suppression.violations,
+            "downgrades": not self.downgrades,
+            "membership": self.membership.ok,
+            "segments": all(s.ok for s in self.segments),
+            "checksums": not self.checksums.mismatches,
+            "campaigns": all(
+                not c.residual_source_tags and c.render_matches for c in self.campaigns
+            ),
+        }
+        return [name for name, ok in checks.items() if not ok]
+
+    @property
     def passed(self) -> bool:
-        return (
-            all(c.ok for c in self.consent_counts)
-            and not self.suppression.violations
-            and not self.downgrades
-            and self.membership.ok
-            and all(s.ok for s in self.segments)
-            and not self.checksums.mismatches
-            and all(not c.residual_source_tags and c.render_matches for c in self.campaigns)
-        )
+        return not self.failing
 
 
 def _sample(plan: MigrationPlan) -> list[DesiredSubscriber]:
@@ -557,6 +572,24 @@ def render_markdown(report: ReconciliationReport) -> str:
     return "\n\n".join(sections) + "\n"
 
 
+def verdict_line(report: ReconciliationReport) -> str:
+    if report.passed:
+        return "reconcile PASS"
+    return f"reconcile FAIL: {', '.join(report.failing)}"
+
+
+def history_record(report: ReconciliationReport, spec: MappingSpec) -> dict:
+    return {
+        "at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "passed": report.passed,
+        "failing": report.failing,
+        "suppression_pct": report.suppression.pct,
+        "deviations": len(report.deviations),
+        "baseline_run": report.baseline_run,
+        "spec_sha256": spec.approval.content_sha256 if spec.approval else None,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--spec", type=Path, required=True, help="APPROVED spec yaml")
@@ -571,8 +604,22 @@ def main() -> int:
         default=DEFAULT_JOURNAL,
         help="execution journal holding the destination's baseline (RC1-574)",
     )
+    parser.add_argument(
+        "--history",
+        type=Path,
+        default=None,
+        help="append one JSONL verdict record per run (parallel-run trend, RC1-557)",
+    )
     args = parser.parse_args()
+    try:
+        return _run(args)
+    except (GateError, IngestError, TargetError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print("reconcile ERROR: could not run")
+        return 2
 
+
+def _run(args: argparse.Namespace) -> int:
     with stage("reconcile", target=args.target):
         spec = load_approved(args.spec)
         # Same input binding as the executor (RC1-566): reconciling against a
@@ -596,6 +643,11 @@ def main() -> int:
         print(f"wrote {args.out}")
     else:
         print(markdown)
+    if args.history:
+        args.history.parent.mkdir(parents=True, exist_ok=True)
+        with args.history.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(history_record(report, spec), separators=(",", ":")) + "\n")
+    print(verdict_line(report))
     return 0 if report.passed else 1
 
 

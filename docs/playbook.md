@@ -119,13 +119,18 @@ re-approval), never the diff.
 
 ## 5. Execute
 
-1. `uv run python -m executor.run --spec ... --execute [--target <t>]`.
+1. `uv run python -m executor.run --spec ... --execute --verify-convergence
+   [--target <t>]`. The first run against a destination journals it as
+   found (the baseline reconciliation reads in stage 6).
 2. Phase order is enforced by the executor, not by the operator:
    suppressions land non-subscribable first, then subscribers, then draft
    campaigns (nothing is sent).
-3. Prove convergence: run the executor a second time and confirm it reports
-   zero writes. Idempotent upserts make partial failure recoverable - a
-   crashed run is re-run, not repaired by hand.
+3. Convergence is proven by the same command: `--verify-convergence`
+   re-reads the target after the run and diffs again, read-only; it exits 1
+   and lists the pending writes unless a second pass would write nothing,
+   and the result is in the execution journal. Idempotent upserts make
+   partial failure recoverable - a crashed run is re-run, not repaired by
+   hand.
 
 **Checkpoint**: `esp_migration.executor_writes` vs
 `esp_migration.executor_write_errors`; the write-error monitor should stay
@@ -133,13 +138,23 @@ green through the run.
 
 ## 6. Reconciliation - acceptance criteria
 
-`uv run python -m executor.reconcile --spec ...` produces the customer-facing
-sign-off report. PASS requires all of:
+`uv run python -m executor.reconcile --spec ... --journal <the run's journal>`
+produces the customer-facing sign-off report. The journal supplies the
+destination as the first run found it: contacts the customer already had
+are left out of membership, and an address the destination already
+protected is reported as an expected deviation, not a failure (ADR-0019).
+Without it, the destination is assumed to have started empty. PASS requires
+all of:
 
 - **Consent counts**: every consent state matches expected exactly, and the
   total matches.
 - **Suppression integrity: 100%, enumerated.** Every suppressed address is
   individually verified non-subscribable in the target. 99.9% is a FAIL.
+  The baseline never enters this check.
+- **Protection kept**: no address the destination protected before the
+  migration is mailable now.
+- **Membership**: every planned address is on the list, and nothing else is
+  except the pre-existing contacts.
 - **Segment parity**: target counts match the plan. Source counts are
   reference only - the approved spec may deliberately change segment
   semantics.
@@ -147,8 +162,22 @@ sign-off report. PASS requires all of:
 - **Campaign translation**: zero residual source merge tags, rendered output
   matches.
 
-Any FAIL stops the cutover clock. Re-run reconciliation daily through the
-parallel-run window; unsubscribes collected in the source re-sync by
+Any FAIL stops the cutover clock. Through the parallel-run window the report
+runs on a schedule, not by hand - only the reaction to a FAIL needs a human.
+Exit codes are 0 PASS, 1 FAIL, 2 could not run; the last line printed is the
+verdict (`reconcile PASS` / `reconcile FAIL: suppression, membership`); and
+`--history` appends one JSONL record per run, so the window's trend is a
+file. For example, daily from cron on the operator workstation:
+
+```cron
+0 7 * * *  cd /path/to/esp-migration-agent && uv run python -m executor.reconcile \
+  --spec specs/approved/<spec>.yaml --journal docs/execution_journal.jsonl \
+  --history docs/parallel_run.jsonl --out docs/reconcile-latest.md
+```
+
+or the same command as a scheduled GitHub Actions job (`on: schedule`) with
+the target credentials as repository secrets - the job fails on exit 1 or 2,
+which is the page. Unsubscribes collected in the source re-sync by
 re-running the executor (the suppression phase picks them up first).
 
 **Abort point**: this is the formal go/no-go. No PASS, no cutover, no
@@ -163,10 +192,24 @@ Generate the plan from the approved spec rather than writing it by hand:
 `uv run python -m executor.cutover --spec ... --out cutover_plan.md`. The
 committed [cutover_plan.md](cutover_plan.md) is a worked example. In brief:
 
-1. Announce a 24-hour freeze; pull a fresh export at freeze start; re-run
-   discovery and diff counts against the plan's scope.
-2. Final delta pass: re-run the executor against the fresh export - upserts
-   converge, so only freeze-window deltas write.
+1. Announce a 24-hour freeze and pull a fresh export at freeze start. Then
+   `uv run python -m discovery.freeze_diff --spec specs/approved/<spec>.yaml
+   --reviewed-audience-dir <reviewed> --reviewed-supplement-dir <reviewed>
+   --audience-dir <fresh> --supplement-dir <fresh>`. It checks the reviewed
+   export against the approval, re-runs discovery on the fresh one, and
+   prints the delta: members joined, left, and changed consent (new
+   suppressions, re-subscribes), structure, and risks.
+   - **Data only** (exit 0): it writes the same spec bound to the fresh
+     export as a DRAFT. The approval covers the exact files reviewed, so
+     the spec owner re-signs it: `mapping.review approve <draft> --by ...`.
+   - **Structural** (exit 1: new columns, segments, campaigns, audiences, or
+     a spec that no longer builds a plan): no draft. Re-propose; the
+     reviewed mappings do not cover this export.
+   Addresses that left the export stay in the target - the executor never
+   deletes - so decide them with the client.
+2. Final delta pass: run the executor against the fresh export under the
+   re-signed spec, with `--verify-convergence` - upserts converge, so only
+   freeze-window deltas write.
 3. Repoint signup forms and integrations to the target.
 4. First send per the ramp in the plan, with bounce/complaint monitoring
    live; target sending stays OFF until the parallel-run reconciliation has
