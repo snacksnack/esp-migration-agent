@@ -14,8 +14,12 @@ against a partially-migrated target converges to zero writes.
 from __future__ import annotations
 
 from collections import Counter
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:  # journal imports engine's models; avoid the runtime cycle
+    from executor.journal import ExecutionJournal
 
 from executor.plan import (
     DesiredSubscriber,
@@ -139,13 +143,29 @@ class ExecutionSummary(BaseModel):
     conflicts: list[str] = []  # kept at the destination's stricter consent
 
 
-def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
-    """Write the plan to the target, suppressions first, upserts throughout."""
+def execute(
+    plan: MigrationPlan,
+    client: TargetClient,
+    journal: ExecutionJournal | None = None,
+) -> ExecutionSummary:
+    """Write the plan to the target, suppressions first, upserts throughout.
+    Each completed write lands in the journal before the next one starts, so
+    an interrupted run's record ends exactly where the run did (RC1-571)."""
     list_id = client.ensure_list(plan.list_name)
     current = client.current_subscribers(list_id)
     written: Counter = Counter()
     skipped = 0
     conflicts: list[str] = []
+    # Adapters count read-back recoveries (RC1-570); a delta across one write
+    # means that write's response was lost and the recovery stood in for it.
+    recovered_seen = getattr(client, "recovered_calls", 0)
+
+    def journal_write(phase: str, action: str, key: str) -> None:
+        nonlocal recovered_seen
+        recovered_now = getattr(client, "recovered_calls", 0)
+        if journal is not None:
+            journal.write(phase, action, key, recovered=recovered_now > recovered_seen)
+        recovered_seen = recovered_now
 
     # Phases 1 then 2, in the plan's structural order.
     for desired in plan.all_subscribers:
@@ -154,6 +174,7 @@ def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
                 f"write-time invariant check: {desired.email} is suppressed but "
                 "planned subscribable; aborting before the write"
             )
+        phase = "1-suppressions" if desired.suppressed else "2-subscribers"
         action = _subscriber_action(desired, current, plan.target)
         if action == "create":
             client.create_subscriber(desired, list_id)
@@ -161,11 +182,14 @@ def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
             client.update_subscriber(current[desired.email.lower()], desired, list_id)
         elif action == "conflict":
             conflicts.append(desired.email)
+            if journal is not None:
+                journal.conflict(phase, desired.email)
             continue
         else:
             skipped += 1
             continue
         written[action] += 1
+        journal_write(phase, action, desired.email)
 
     current_campaigns = client.current_campaigns()
     for campaign in plan.campaigns:
@@ -178,6 +202,7 @@ def execute(plan: MigrationPlan, client: TargetClient) -> ExecutionSummary:
             skipped += 1
             continue
         written[action] += 1
+        journal_write("3-campaigns", action, campaign.name)
 
     return ExecutionSummary(
         list_id=list_id,

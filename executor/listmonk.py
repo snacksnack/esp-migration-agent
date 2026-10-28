@@ -67,6 +67,8 @@ class ListmonkClient:
             transport=transport,
         )
         self._sleep = sleep
+        self._api_user = username
+        self.recovered_calls = 0  # read-backs that stood in for a lost response
 
     def _call(
         self,
@@ -84,10 +86,19 @@ class ListmonkClient:
             sleep=self._sleep,
         )
         if isinstance(result, Recovered):
+            self.recovered_calls += 1
             return result.data
         if result.status_code >= 400:
             raise TargetError(f"{what}: HTTP {result.status_code} {result.text[:300]}")
         return result.json().get("data")
+
+    def describe_destination(self) -> dict[str, str]:
+        """Which Listmonk this is, for the execution journal (RC1-571)."""
+        return {
+            "platform": "listmonk",
+            "host": str(self._http.base_url).rstrip("/"),
+            "api_user": self._api_user,
+        }
 
     # --- lists ---------------------------------------------------------------
 
