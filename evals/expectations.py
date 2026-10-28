@@ -83,7 +83,22 @@ CLEAN = CaseExpectations(
     },
 )
 
+#: The RC1-572 custom-fields corpus: the generator's default ZIP and
+#: LASTPURCH seedings plus a new ambiguity class - a CUSTOM merge field with
+#: mixed formats. LOYALTY_TIER mixes casings, trailing padding and numeric
+#: tiers ('gold', 'GOLD ', '2', 'tier-3'): whether those are one tier or four
+#: is the customer's call, so proposing a normalization is a guess. POINTS is
+#: uniformly integer - its precision twin, one defensible answer.
+CUSTOM_FIELDS = CaseExpectations(
+    must_flag=frozenset(
+        {("field", "ZIP"), ("field", "LASTPURCH"), ("field", "LOYALTY_TIER")}
+    ),
+    must_propose=_COMMON_PROPOSE | frozenset({("field", "POINTS")}),
+    targets={**_COMMON_TARGETS, ("field", "POINTS"): _contains("point")},
+)
+
 BY_CASE: dict[str, CaseExpectations] = {
     "fixture-ambiguities": FIXTURE,
     "clean-variant": CLEAN,
+    "custom-fields": CUSTOM_FIELDS,
 }

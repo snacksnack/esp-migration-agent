@@ -44,6 +44,18 @@ ROLE_LOCALPARTS = ["info", "postmaster", "admin", "sales", "support"]
 MESSY_DATE_FORMATS = ["%b %d %Y", "%d/%m/%Y", "%m-%d-%y"]
 PROSE_DATES = ["last spring", "around the holidays", "n/a"]
 
+# Custom merge fields for the breadth corpora (RC1-572): LOYALTY_TIER mixes
+# casings, padding, and numeric tiers on purpose - a seeded ambiguity the
+# proposer must flag; POINTS is uniformly integers - the one-defensible-answer
+# precision side. Values are drawn from a SEPARATE rng stream so enabling them
+# never shifts the default output (seeding/ground_truth.json is committed).
+CUSTOM_FIELD_MAKERS = {
+    "LOYALTY_TIER": lambda rng: rng.choice(
+        ["gold", "Gold", "GOLD ", "silver", "Silver", "2", "tier-3"]
+    ),
+    "POINTS": lambda rng: str(rng.randint(0, 5000)),
+}
+
 
 class Subscriber(BaseModel):
     email: str
@@ -57,6 +69,7 @@ class Subscriber(BaseModel):
     tenure_cohort: str
     domain_class: str  # consumer | corporate
     seeded_risks: list[str] = []
+    custom: dict[str, str] = {}  # custom merge-field values (RC1-572)
 
 
 class GroundTruth(BaseModel):
@@ -78,8 +91,16 @@ def _weighted(rng: random.Random, weights: dict[str, float | int]) -> str:
     return rng.choices(names, weights=[weights[n] for n in names], k=1)[0]
 
 
-def generate(count: int = 450, seed: int = 542) -> tuple[list[Subscriber], GroundTruth]:
+def generate(
+    count: int = 450, seed: int = 542, custom_fields: tuple[str, ...] = ()
+) -> tuple[list[Subscriber], GroundTruth]:
+    unknown = [f for f in custom_fields if f not in CUSTOM_FIELD_MAKERS]
+    if unknown:
+        raise ValueError(
+            f"no maker for custom field(s) {unknown}; known: {sorted(CUSTOM_FIELD_MAKERS)}"
+        )
     rng = random.Random(seed)
+    custom_rng = random.Random(seed + 7)  # separate stream: defaults stay byte-identical
     fake = Faker()
     fake.seed_instance(seed)
     now = datetime(2026, 10, 24, tzinfo=UTC)
@@ -146,6 +167,7 @@ def generate(count: int = 450, seed: int = 542) -> tuple[list[Subscriber], Groun
                 tenure_cohort=cohort,
                 domain_class=domain_class,
                 seeded_risks=risks,
+                custom={f: CUSTOM_FIELD_MAKERS[f](custom_rng) for f in custom_fields},
             )
         )
 

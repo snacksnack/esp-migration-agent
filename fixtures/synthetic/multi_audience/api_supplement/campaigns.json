@@ -1,0 +1,36 @@
+[
+ {
+  "id": "ma0000000a",
+  "status": "save",
+  "type": "regular",
+  "settings": {
+   "title": "Audience A news",
+   "subject_line": "News for A",
+   "from_name": "Synthetic Dispatch"
+  },
+  "recipients": {
+   "list_id": "572000000a",
+   "recipient_count": 258
+  },
+  "content": {
+   "html": "<p>Hi *|FNAME|*</p>"
+  }
+ },
+ {
+  "id": "mb0000000b",
+  "status": "save",
+  "type": "regular",
+  "settings": {
+   "title": "Audience B news",
+   "subject_line": "News for B",
+   "from_name": "Synthetic Dispatch"
+  },
+  "recipients": {
+   "list_id": "572000000b",
+   "recipient_count": 279
+  },
+  "content": {
+   "html": "<p>Hi *|FNAME|*</p>"
+  }
+ }
+]
