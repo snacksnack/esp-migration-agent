@@ -11,7 +11,8 @@ often does not exist at review time), `plan` (the diff's counts), one `write`
 per completed write (phase, action, key; `recovered: true` when the adapter's
 read-back stood in for a lost response, RC1-570), `conflict` per address kept
 at the destination's stricter consent (ADR-0013), and `run_failed` (the last
-error, response text included) or `run_complete` (the summary).
+error, response text included) or `run_complete` (the summary), and with
+--verify-convergence a `convergence` event: the read-only re-diff (RC1-557).
 
 `baseline` (RC1-574, ADR-0019): the destination as the migration found it -
 every member of the list with its consent, plus account-wide records for
@@ -177,6 +178,17 @@ class ExecutionJournal:
 
     def conflict(self, phase: str, key: str) -> None:
         self._event("conflict", phase=phase, key=key)
+
+    def convergence(self, diff: PlanDiff) -> None:
+        """RC1-557: the read-only re-diff after the run - proof, in the
+        record, that a second pass would write nothing (or what it would)."""
+        pending = diff.writes
+        self._event(
+            "convergence",
+            converged=not pending,
+            pending=len(pending),
+            sample=[f"{e.action} {e.key}" for e in pending[:10]],
+        )
 
     def run_failed(self, error: str) -> None:
         self._event("run_failed", error=error)
