@@ -273,7 +273,9 @@ class ListmonkClient:
             "GET",
             "/subscribers",
             f"count query {query!r}",
-            params={"list_id": list_id, "query": query, "page": 1, "per_page": 1},
+            # Listmonk splices the query after its list filter unparenthesized
+            # (probed, RC1-573): a bare `A OR B` counts B account-wide.
+            params={"list_id": list_id, "query": f"({query})", "page": 1, "per_page": 1},
         )
         return data["total"]
 

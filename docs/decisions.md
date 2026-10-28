@@ -24,7 +24,10 @@ REPLACES list memberships: the old update sent `lists:[this list]` and
 silently dropped every other membership, a pre-populated target included.
 (3) Bulk `PUT /subscribers/lists` action add attaches a membership without
 touching the global status. (4) A PUT listing an existing membership leaves
-that subscription as it is. Brevo's create is an upsert whose blacklist flag
+that subscription as it is. (5) The subscriber `query` is spliced after the
+list filter without parentheses: a segment `A OR B` counted B across the
+whole account. Found by the e2e once a second list existed; the adapter now
+wraps every segment query. Brevo's create is an upsert whose blacklist flag
 would have un-suppressed a contact another audience suppressed.
 
 **Mechanics.** Addresses not on the destination list are looked up account-

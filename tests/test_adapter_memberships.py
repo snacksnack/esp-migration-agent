@@ -104,6 +104,13 @@ def test_listmonk_current_subscribers_report_all_memberships():
     assert (sub.subscription, sub.list_ids) == ("confirmed", [3, 9])
 
 
+def test_listmonk_segment_count_keeps_an_or_inside_the_list():
+    rec = Recorder(lambda r: httpx.Response(200, json={"data": {"results": [], "total": 0}}))
+    listmonk(rec).count_query(9, "a = 1 OR b = 2")
+    params = rec.requests[0].url.params
+    assert (params["list_id"], params["query"]) == ("9", "(a = 1 OR b = 2)")
+
+
 # --- Brevo ----------------------------------------------------------------------------
 
 
