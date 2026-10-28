@@ -308,6 +308,7 @@ def load_campaigns(supplement_dir: Path) -> list[CampaignMeta]:
                     subject_line=settings["subject_line"],
                     from_name=settings["from_name"],
                     list_id=recipients["list_id"],
+                    list_name=recipients.get("list_name") or "",
                     recipient_count=recipients["recipient_count"],
                     saved_segment_id=(recipients.get("segment_opts") or {}).get(
                         "saved_segment_id"
@@ -319,6 +320,48 @@ def load_campaigns(supplement_dir: Path) -> list[CampaignMeta]:
         except (KeyError, ValidationError) as exc:
             raise IngestError(f"campaigns.json: bad campaign {raw.get('id')!r}: {exc}") from exc
     return campaigns
+
+
+def audiences_in(bundle: MailchimpBundle) -> list[str]:
+    """Audience names the supplement's campaigns target, sorted. The audience
+    CSVs carry no name of their own, so this is the only in-bundle evidence
+    of which audiences exist (RC1-573)."""
+    return sorted({c.list_name for c in bundle.campaigns if c.list_name})
+
+
+def resolve_audience(bundle: MailchimpBundle, requested: str | None) -> str | None:
+    """Which audience this export is. An explicit name must be one the
+    supplement knows (when it knows any); with none given, exactly one known
+    audience is unambiguous, several is a refusal naming them - an export
+    must never be silently attributed to the wrong audience."""
+    known = audiences_in(bundle)
+    if requested is not None:
+        if known and requested not in known:
+            raise IngestError(
+                f"audience {requested!r} is not one the supplement's campaigns "
+                f"target: {known}"
+            )
+        return requested
+    if len(known) > 1:
+        raise IngestError(
+            f"the supplement spans {len(known)} audiences {known}; name the one "
+            "this export is with --audience (each audience is proposed, "
+            "reviewed, and migrated on its own)"
+        )
+    return known[0] if known else None
+
+
+def scope_to_audience(bundle: MailchimpBundle, audience: str | None) -> MailchimpBundle:
+    """The bundle as one audience sees it: only that audience's campaigns.
+    A shared supplement otherwise migrates every audience's campaigns into
+    each audience's list. Unnamed campaigns (pre-RC1-573 supplements) stay."""
+    if audience is None:
+        return bundle
+    return bundle.model_copy(
+        update={
+            "campaigns": [c for c in bundle.campaigns if c.list_name in ("", audience)]
+        }
+    )
 
 
 def bundle_fingerprint(audience_dir: Path, supplement_dir: Path) -> str:

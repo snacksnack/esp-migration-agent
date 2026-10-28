@@ -20,7 +20,14 @@ from collections import Counter
 from pathlib import Path
 
 from discovery.inventory import build_inventory
-from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, bundle_fingerprint, load_bundle
+from ingest.mailchimp import (
+    DEFAULT_ACCOUNT_TZ,
+    IngestError,
+    bundle_fingerprint,
+    load_bundle,
+    resolve_audience,
+    scope_to_audience,
+)
 from mapping.gate import GateError, approve, load_spec, mapping_label
 from mapping.proposer import ProposalError, propose
 from specs.model import MappingSpec, MappingStatus
@@ -64,15 +71,20 @@ def cmd_propose(args: argparse.Namespace) -> int:
     enable_llmobs()
     with stage("propose"), workflow("mapping.propose"):
         bundle = load_bundle(args.audience_dir, args.supplement_dir, args.account_tz)
+        # One audience per proposal (RC1-573): the proposer sees only this
+        # audience's campaigns and merge tags.
+        audience = resolve_audience(bundle, args.audience)
+        bundle = scope_to_audience(bundle, audience)
         spec = propose(bundle, build_inventory(bundle), target=args.target)
     # Stamp the source identity the review (and later the approval) covers
-    # (RC1-566/RC1-569). Python's stamp, never the model's.
+    # (RC1-566/RC1-569/RC1-573). Python's stamp, never the model's.
     spec = spec.model_copy(
         update={
             "source_fingerprint": bundle_fingerprint(
                 args.audience_dir, args.supplement_dir
             ),
             "source_timezone": args.account_tz,
+            "source_audience": audience,
         }
     )
     out: Path = args.out or DRAFTS_DIR / f"{spec.source}_to_{spec.target}.yaml"
@@ -114,6 +126,11 @@ def main() -> int:
     p.add_argument("--supplement-dir", type=Path, default=FIXTURE_SUPPLEMENT)
     p.add_argument("--account-tz", default=DEFAULT_ACCOUNT_TZ)
     p.add_argument("--target", default="listmonk")
+    p.add_argument(
+        "--audience",
+        default=None,
+        help="which audience this export is; required when the supplement spans several",
+    )
     p.add_argument("--out", type=Path, default=None)
     p.set_defaults(func=cmd_propose)
 
@@ -130,7 +147,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         return args.func(args)
-    except (GateError, ProposalError) as exc:
+    except (GateError, ProposalError, IngestError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

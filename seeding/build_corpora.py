@@ -34,6 +34,7 @@ from seeding.generator import Subscriber, generate
 
 SYNTHETIC = Path("fixtures/synthetic")
 CUSTOM_FIELDS = ("LOYALTY_TIER", "POINTS")
+AUDIENCE_A, AUDIENCE_B = "Retail customers", "Wholesale partners"
 
 LOYALTY_HTML = (
     "<p>*|IF:FNAME|*Hi *|FNAME|*,*|ELSE:|*Hi there,*|END:IF|*</p>"
@@ -66,7 +67,8 @@ def build_custom_fields(out: Path) -> None:
         ],
         campaigns=[
             make_campaign("cf00000001", "Loyalty update", "Your loyalty status",
-                          LOYALTY_HTML, list_id, len(subscribed)),
+                          LOYALTY_HTML, list_id, len(subscribed),
+                          list_name="Loyalty members"),
         ],
     )
     _write_truth(
@@ -107,15 +109,18 @@ def build_multi_audience(out: Path) -> None:
         out / "api_supplement",
         campaigns=[
             make_campaign("ma0000000a", "Audience A news", "News for A",
-                          "<p>Hi *|FNAME|*</p>", "572000000a", len(_exported(a_subs))),
+                          "<p>Hi *|FNAME|*</p>", "572000000a", len(_exported(a_subs)),
+                          list_name=AUDIENCE_A),
             make_campaign("mb0000000b", "Audience B news", "News for B",
-                          "<p>Hi *|FNAME|*</p>", "572000000b", len(_exported(b_subs))),
+                          "<p>Hi *|FNAME|*</p>", "572000000b", len(_exported(b_subs)),
+                          list_name=AUDIENCE_B),
         ],
     )
     _write_truth(
         out / "ground_truth.json",
         {
             "corpus": "multi_audience",
+            "audience_names": {"audience_a": AUDIENCE_A, "audience_b": AUDIENCE_B},
             "audience_a": {"subscribed": len(_exported(a_subs)),
                            "unsubscribed": len(_exported(a_subs, "unsubscribed"))},
             "audience_b": {"subscribed": len(_exported(b_subs)),

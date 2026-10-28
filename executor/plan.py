@@ -20,6 +20,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel
 
+from ingest.mailchimp import audiences_in, scope_to_audience
 from ingest.models import ConsentBucket, MailchimpBundle, SubscriberRecord
 from specs.model import MappingSpec, MappingStatus, SpecStatus
 
@@ -106,6 +107,22 @@ def target_state_subscribable(target: str, status: str, subscription: str) -> bo
     return True
 
 
+def existing_record_protected(target: str, status: str, subscription: str) -> bool:
+    """Whether an existing record found ANYWHERE on the target already
+    protects its address (RC1-573). An empty subscription means the adapter
+    reports no list-level consent for it (Listmonk: not on this list), so
+    only a GLOBAL status can protect it - judged by whether any subscribable
+    dialect state uses that status; unknown targets fail safe to protected.
+    Otherwise the pair is judged exactly as for list members (Brevo reports
+    its global consent as the pair)."""
+    if subscription == "":
+        return not any(
+            state.subscribable and state.status == status
+            for state in CONSENT_DIALECTS.get(target, {}).values()
+        )
+    return not target_state_subscribable(target, status, subscription)
+
+
 # --- plan models -------------------------------------------------------------
 
 class DesiredSubscriber(BaseModel):
@@ -172,6 +189,15 @@ def _attrib_key(target_field: str, source_field: str) -> str | None:
     )
 
 
+def destination_list_name(spec: MappingSpec) -> str:
+    """Per audience when the spec names one (RC1-573). Specs approved before
+    then keep the original single name, so their committed reports and the
+    e2e target stay valid."""
+    if spec.source_audience is None:
+        return f"Imported audience ({spec.source})"
+    return f"{spec.source_audience} (imported from {spec.source})"
+
+
 # --- the builder -------------------------------------------------------------
 
 def build_plan(bundle: MailchimpBundle, spec: MappingSpec) -> MigrationPlan:
@@ -183,6 +209,23 @@ def build_plan(bundle: MailchimpBundle, spec: MappingSpec) -> MigrationPlan:
     if spec.target not in CONSENT_DIALECTS:
         raise PlanError(f"no consent dialect for target {spec.target!r}")
     dialect = CONSENT_DIALECTS[spec.target]
+
+    # One audience per plan (RC1-573): the approved spec names it, the plan
+    # names the list after it and carries only its campaigns.
+    known = audiences_in(bundle)
+    if spec.source_audience is None:
+        if len(known) > 1:
+            raise PlanError(
+                f"the supplement spans {len(known)} audiences {known} but the "
+                "approved spec names none: every audience would land in one list. "
+                "Re-propose per audience with --audience and re-approve."
+            )
+    elif known and spec.source_audience not in known:
+        raise PlanError(
+            f"approved spec is for audience {spec.source_audience!r}, which no "
+            f"campaign in this supplement targets ({known}): wrong export?"
+        )
+    bundle = scope_to_audience(bundle, spec.source_audience)
 
     consent_by_bucket: dict[str, ConsentState] = {}
     for mapping in spec.consent_mappings:
@@ -288,7 +331,7 @@ def build_plan(bundle: MailchimpBundle, spec: MappingSpec) -> MigrationPlan:
     return MigrationPlan(
         source=spec.source,
         target=spec.target,
-        list_name=f"Imported audience ({spec.source})",
+        list_name=destination_list_name(spec),
         suppressions=suppressions,
         subscribers=subscribers,
         campaigns=campaigns,

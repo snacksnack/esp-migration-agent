@@ -32,6 +32,18 @@ class FakeTarget:
     def current_subscribers(self, list_id: int) -> dict[str, TargetSubscriber]:
         return {k: v.model_copy(deep=True) for k, v in self.subscribers.items()}
 
+    def lookup_subscribers(self, emails: list[str]) -> dict[str, TargetSubscriber]:
+        # One global namespace here, so current_subscribers already returned
+        # every record: nothing lives off-list. tests/test_cross_audience.py
+        # models per-list membership.
+        return {
+            e.lower(): self.subscribers[e.lower()].model_copy(deep=True)
+            for e in emails if e.lower() in self.subscribers
+        }
+
+    def attach_subscriber(self, existing: TargetSubscriber, list_id: int) -> None:
+        self.write_calls += 1
+
     def _store(self, desired: DesiredSubscriber, sub_id: int) -> None:
         self.subscribers[desired.email.lower()] = TargetSubscriber(
             id=sub_id,

@@ -26,6 +26,7 @@ from executor.plan import (
     MigrationPlan,
     PlannedCampaign,
     SuppressionViolationError,
+    existing_record_protected,
     target_state_subscribable,
 )
 from executor.target import TargetClient, TargetSubscriber
@@ -44,7 +45,9 @@ def subscriber_converged(existing: TargetSubscriber, desired: DesiredSubscriber)
 
 class DiffEntry(BaseModel):
     phase: str
-    action: str  # create | update | unchanged | conflict (kept, reported)
+    # create | update | unchanged | conflict (kept, reported) | attach (a
+    # conflict off this list: membership added, consent untouched)
+    action: str
     key: str  # email or campaign name
 
 
@@ -59,15 +62,31 @@ class PlanDiff(BaseModel):
 
     @property
     def writes(self) -> list[DiffEntry]:
-        return [e for e in self.entries if e.action in ("create", "update")]
+        return [e for e in self.entries if e.action in ("create", "update", "attach")]
 
 
 def _subscriber_action(
-    desired: DesiredSubscriber, current: dict[str, TargetSubscriber], target: str
+    desired: DesiredSubscriber,
+    current: dict[str, TargetSubscriber],
+    target: str,
+    elsewhere: dict[str, TargetSubscriber] | None = None,
 ) -> str:
-    existing = current.get(desired.email.lower())
+    key = desired.email.lower()
+    existing = current.get(key)
     if existing is None:
-        return "create"
+        other = (elsewhere or {}).get(key)
+        if other is None:
+            return "create"
+        # On the target but not on this list (another audience, or the
+        # customer's own lists). Contacts are global: creating would collide
+        # or upsert over it. Protected -> "attach": a conflict that also adds
+        # the membership, consent untouched; otherwise update it onto this
+        # list, other memberships preserved (RC1-573, ADR-0018).
+        if desired.subscribable and existing_record_protected(
+            target, other.status, other.subscription
+        ):
+            return "attach"
+        return "update"
     if subscriber_converged(existing, desired):
         return "unchanged"
     if desired.subscribable and not target_state_subscribable(
@@ -94,11 +113,12 @@ def compute_diff(
     plan: MigrationPlan,
     current_subscribers: dict[str, TargetSubscriber],
     current_campaigns: dict[str, PlannedCampaign],
+    elsewhere: dict[str, TargetSubscriber] | None = None,
 ) -> PlanDiff:
     entries = [
         DiffEntry(
             phase="1-suppressions" if d.suppressed else "2-subscribers",
-            action=_subscriber_action(d, current_subscribers, plan.target),
+            action=_subscriber_action(d, current_subscribers, plan.target, elsewhere),
             key=d.email,
         )
         for d in plan.all_subscribers
@@ -124,12 +144,19 @@ def render_diff(diff: PlanDiff, max_examples: int = 5) -> str:
             lines.append(f"    {e.action}  {e.key}")
         if len(examples) > max_examples:
             lines.append(f"    ... and {len(examples) - max_examples:,} more")
-    conflicts = [e for e in diff.entries if e.action == "conflict"]
+    conflicts = [e for e in diff.entries if e.action in ("conflict", "attach")]
     if conflicts:
+        attached = sum(1 for e in conflicts if e.action == "attach")
         lines.append(
             f"  {len(conflicts):,} conflict(s): the destination already holds "
             "these addresses in a stricter consent state; the executor keeps "
             "that state and never downgrades protection"
+            + (
+                f" ({attached:,} held elsewhere on the target are attached to "
+                "this list with that state)"
+                if attached
+                else ""
+            )
         )
     if not diff.writes:
         lines.append("  target already converged: nothing to write")
@@ -153,6 +180,9 @@ def execute(
     an interrupted run's record ends exactly where the run did (RC1-571)."""
     list_id = client.ensure_list(plan.list_name)
     current = client.current_subscribers(list_id)
+    elsewhere = client.lookup_subscribers(
+        [d.email for d in plan.all_subscribers if d.email.lower() not in current]
+    )
     written: Counter = Counter()
     skipped = 0
     conflicts: list[str] = []
@@ -175,11 +205,17 @@ def execute(
                 "planned subscribable; aborting before the write"
             )
         phase = "1-suppressions" if desired.suppressed else "2-subscribers"
-        action = _subscriber_action(desired, current, plan.target)
+        key = desired.email.lower()
+        action = _subscriber_action(desired, current, plan.target, elsewhere)
         if action == "create":
             client.create_subscriber(desired, list_id)
         elif action == "update":
-            client.update_subscriber(current[desired.email.lower()], desired, list_id)
+            client.update_subscriber(current.get(key) or elsewhere[key], desired, list_id)
+        elif action == "attach":
+            client.attach_subscriber(elsewhere[key], list_id)
+            conflicts.append(desired.email)
+            if journal is not None:
+                journal.conflict(phase, desired.email)
         elif action == "conflict":
             conflicts.append(desired.email)
             if journal is not None:
