@@ -181,6 +181,7 @@ class BrevoClient:
         )
         self._sleep = sleep
         self._defined_attributes: set[str] | None = None
+        self.recovered_calls = 0  # read-backs that stood in for a lost response
 
     def _call(
         self,
@@ -202,11 +203,23 @@ class BrevoClient:
             sleep=self._sleep,
         )
         if isinstance(result, Recovered):
+            self.recovered_calls += 1
             return result.data
         resp = result
         if resp.status_code >= 400 and resp.status_code not in (ok_codes or set()):
             raise TargetError(f"{what}: HTTP {resp.status_code} {resp.text[:300]}")
         return resp.json() if resp.content else {}
+
+    def describe_destination(self) -> dict[str, str]:
+        """Which Brevo ACCOUNT this is, for the execution journal (RC1-571):
+        the host never varies, so identity lives in the account record."""
+        account = self._call("GET", "/account", "describe account")
+        return {
+            "platform": "brevo",
+            "host": "api.brevo.com",
+            "account_email": account.get("email") or "",
+            "organization": account.get("companyName") or "",
+        }
 
     # --- lists -----------------------------------------------------------------
 
