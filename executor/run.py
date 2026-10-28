@@ -19,6 +19,7 @@ from pathlib import Path
 
 from executor.clients import TARGETS, client_for_target
 from executor.engine import compute_diff, execute, render_diff
+from executor.journal import ExecutionJournal, spec_provenance
 from executor.plan import PlanError, build_plan
 from executor.target import TargetError
 from ingest.mailchimp import DEFAULT_ACCOUNT_TZ, load_bundle
@@ -46,9 +47,16 @@ def main() -> int:
         default="listmonk",
         help="which adapter writes; the plan and engine are target-agnostic",
     )
+    parser.add_argument(
+        "--journal",
+        type=Path,
+        default=Path("docs/execution_journal.jsonl"),
+        help="append-only JSONL run record (RC1-571); written only with --execute",
+    )
     args = parser.parse_args()
 
     mode = "execute" if args.execute else "dry_run"
+    journal: ExecutionJournal | None = None
     try:
         with stage("execute", mode=mode, target=args.target):
             spec = load_approved(args.spec)
@@ -69,6 +77,20 @@ def main() -> int:
             # list up read-only and diff against empty when it is absent
             # (RC1-564). Only --execute may create it.
             if args.execute:
+                # The journal opens before the first possible write (the list
+                # itself), so every run that touched the target has a record.
+                journal = ExecutionJournal(args.journal)
+                journal.run_start(
+                    target=args.target,
+                    spec=spec_provenance(args.spec, spec),
+                    source={
+                        "audience_dir": str(args.audience_dir),
+                        "supplement_dir": str(args.supplement_dir),
+                        "account_tz": args.account_tz,
+                    },
+                    destination=client.describe_destination(),
+                    list_name=plan.list_name,
+                )
                 list_id = client.ensure_list(plan.list_name)
             else:
                 list_id = client.find_list(plan.list_name)
@@ -83,11 +105,13 @@ def main() -> int:
                 print("\ndry run only; pass --execute to write")
                 return 0
 
+            journal.plan(diff)
             try:
-                summary = execute(plan, client)
+                summary = execute(plan, client, journal)
             except TargetError:
                 count("executor_write_errors", tags={"target": args.target})
                 raise
+            journal.run_complete(summary)
             count(
                 "executor_writes",
                 value=sum(summary.written.values()),
@@ -112,8 +136,15 @@ def main() -> int:
             )
         return 0
     except (GateError, PlanError, TargetError) as exc:
+        if journal is not None:
+            # The failure is part of the record: the journal's last write
+            # event says where the run stopped, this says why.
+            journal.run_failed(str(exc))
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if journal is not None:
+            journal.close()
 
 
 if __name__ == "__main__":
