@@ -44,3 +44,7 @@
   font-size: 0.8rem;
   overflow-wrap: anywhere;
 }
+.ap-identity {
+  color: var(--ink-2);
+  font-size: 0.85rem;
+}

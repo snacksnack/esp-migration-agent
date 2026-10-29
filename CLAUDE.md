@@ -48,11 +48,17 @@ proposes, deterministic Python validates, a human approves.
   Hosted demo (RC1-561/562, ADR-0011/0012): esp.hihelloreid.com, Fly app
   `esp-migration-demo`. READ is public and the gate's 409 refusal is public
   (approve runs the gate before checking identity); every WRITE - resolve
-  and sign-off - needs the approver's HMAC cookie (`review_ui/auth.py`,
-  school-search pattern), so anonymous visitors never change the exhibit;
-  the UI explains via a demo-mode sign-in dialog. ESP_REVIEW_PASSWORD unset
-  = everything open, so dev/CI/tests are untouched. No volume; restart =
-  pristine fixture. Deploys via fly-deploy.yml on CI green (not the e2e).
+  and sign-off - needs a signed-in approver session (`review_ui/auth.py`;
+  school-search lineage), so anonymous visitors never change the exhibit;
+  the UI explains via a demo-mode sign-in dialog. RC1-554 (ADR-0021): OIDC
+  SSO (`review_ui/oidc.py`, Authlib) puts the customer's IdP in front of
+  writes; approvals carry `approval.identity` (verified only via the IdP;
+  password = unverified), the refresh token is re-checked server-side before
+  writes (deactivated at the IdP = 401 at next click, fail closed), and
+  `review_ui/audit.py` hash-chains every gate decision. Session = Starlette
+  signed cookie. Customer setup: docs/sso_runbook.md. ESP_REVIEW_PASSWORD
+  and ESP_OIDC_* unset = everything open, so dev/CI/tests are untouched.
+  No volume; restart = pristine fixture. Deploys via fly-deploy.yml on CI green (not the e2e).
 - `executor/` - Phases 3-4 (ADR-0006/0007): plan builder, target adapters
   (Listmonk dev, Brevo live demo) behind one protocol picked by --target,
   diff/execute engine, reconciliation, cutover plan, dev-target bootstrap.

@@ -27,7 +27,9 @@ obs = [
 # Review-gate UI backend (RC1-560). Optional like obs: the migration pipeline
 # and its tests never import it; only review_ui/ and its API tests do.
 ui = [
+    "authlib>=1.6",
     "fastapi>=0.115",
+    "itsdangerous>=2.2",
     "uvicorn>=0.30",
 ]
 # The shared eval harness (RC1-548), pinned by tag: if the ruler can move

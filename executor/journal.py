@@ -108,6 +108,12 @@ def spec_provenance(path: Path, spec: MappingSpec) -> dict:
         "source_timezone": spec.source_timezone,
         "approved_by": approval.approved_by,
         "approved_at": approval.approved_at.isoformat(),
+        # RC1-554: how the approver authenticated; absent on older approvals.
+        **(
+            {"approver_identity": approval.identity.model_dump(mode="json")}
+            if approval.identity
+            else {}
+        ),
     }
 
 
