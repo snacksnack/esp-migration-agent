@@ -1,0 +1,35 @@
+.ib {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+}
+.ib-who {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--ink-2);
+}
+.ib-verified {
+  color: var(--ok);
+}
+.ib-unverified {
+  color: var(--warn);
+}
+.ib-action {
+  border: 1px solid var(--hairline);
+  background: var(--page);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  text-decoration: none;
+  font: inherit;
+}

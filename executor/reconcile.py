@@ -165,6 +165,9 @@ class ReconciliationReport(BaseModel):
     deviations: list[Deviation] = []
     # Protected in the baseline, mailable now: ADR-0013 broken, whatever the plan says.
     downgrades: list[str] = []
+    # Who signed off on the spec this run reconciles against (RC1-554).
+    approved_by: str = ""
+    approval_identity: str = ""
 
     @property
     def failing(self) -> list[str]:
@@ -422,6 +425,8 @@ def build_reconciliation(
         baseline_note=baseline_note,
         deviations=list(deviations.values()),
         downgrades=downgrades,
+        approved_by=spec.approval.approved_by if spec.approval else "",
+        approval_identity=spec.approval.identity_line() if spec.approval else "",
     )
 
 
@@ -457,6 +462,14 @@ def render_markdown(report: ReconciliationReport) -> str:
     sections = [
         "# Reconciliation report",
         f"Overall: **{'PASS' if report.passed else 'FAIL'}**",
+        *(
+            [
+                "## Approval",
+                f"Spec signed off by {report.approved_by}; {report.approval_identity}.",
+            ]
+            if report.approved_by
+            else []
+        ),
         "## Consent counts",
         "| State | Expected | In target | OK |",
         "| --- | ---: | ---: | --- |",
@@ -587,6 +600,7 @@ def history_record(report: ReconciliationReport, spec: MappingSpec) -> dict:
         "deviations": len(report.deviations),
         "baseline_run": report.baseline_run,
         "spec_sha256": spec.approval.content_sha256 if spec.approval else None,
+        "approved_by": spec.approval.approved_by if spec.approval else None,
     }
 
 

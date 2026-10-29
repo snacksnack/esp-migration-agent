@@ -3,6 +3,58 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0021: The customer's IdP owns approver identity; access is re-asked, not remembered (2026-10-29)
+
+**Decision.** RC1-554: the review gate signs approvers in through the
+customer's identity provider over OIDC (authorization code + PKCE, Authlib
+validates the ID token against the issuer's JWKS). The approval block gains
+an optional `identity` (method, verified, issuer, subject, email, name); the
+cutover plan, execution journal and reconciliation report all print it, and
+an append-only, hash-chained audit log (`review_ui/audit.py`) records every
+gate decision with the actor as the session established it. Okta (Integrator
+free org) plays the customer; the code is plain OIDC, so Entra ID, Google or
+Keycloak drop in by configuration (Keycloak was the pre-merge smoke test).
+
+**Raw OIDC, not WorkOS/Auth0.** The ticket left it open. A broker earns its
+keep across many customers' IdPs and SAML; this demo has one customer and an
+OIDC-native IdP, and a broker would sit between the customer's IdP and the
+gate, which is the relationship being shown. Authlib keeps the security-
+critical parts (state, nonce, PKCE, JWT validation) out of our code. SAML is
+the first follow-up if a customer's IdP forces it.
+
+**Revocation is re-asked before writes.** Sign-in requests `offline_access`;
+the refresh token stays server-side (in memory, keyed by the cookie's random
+sid; the cookie is signed, not encrypted, and holds nothing secret). Before
+a write, if the last confirmation is older than `ESP_OIDC_RECHECK_SECONDS`
+(30), the server runs a refresh-token grant. A deactivated or suspended
+user's grant fails, so their next click is a 401 that names the IdP, and an
+`access_revoked` audit record. Everything fails closed: no refresh token at
+sign-in refuses the sign-in, an unreachable IdP refuses the write (503,
+nothing changed), and a restart that forgets the token asks for a fresh
+sign-in. Considered and rejected: short sessions alone (a deactivated user
+keeps writing until expiry) and re-validating the ID token (a signed JWT
+stays valid until it expires, whatever happens to the user). SCIM push deactivation, which would make
+revocation instant rather than next-click, is deferred to its own story.
+
+**The password stays, labeled.** Portfolio visitors are not in the
+customer's Okta, so the shared demo password remains as a fallback. It
+records `method: password, verified: false`, and every surface says
+"unverified" next to the typed name. Under SSO, a typed name is ignored: the
+IdP's name is the approver. A deploy with no password set is SSO-only, and
+old password cookies stop working with it.
+
+**What the audit log is and is not.** Tamper-evident (each record carries
+the previous record's sha256; `verify_chain` names the first broken line),
+not tamper-proof. Every record also goes to stdout, so Fly's log stream is
+the out-of-band copy. On the hosted demo it is ephemeral like the spec
+(ADR-0011). Anonymous gate refusals are counted in telemetry but not
+audited: the refusal is public, and anonymous clicks must not be able to
+flood the decision log.
+
+**Compatibility.** `identity` sits inside the approval block, which the
+content hash never covers, and `to_yaml` omits it when unset, so every
+existing approved spec round-trips byte-identical (tested).
+
 ## ADR-0020: Playbook toil becomes commands; the human gates stay human (2026-10-28)
 
 **Decision.** RC1-557: the three mechanical steps the playbook left to the

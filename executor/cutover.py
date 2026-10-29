@@ -38,7 +38,8 @@ def render_cutover_plan(
     approved_line = (
         f"Approved by {spec.approval.approved_by} on "
         f"{spec.approval.approved_at.date().isoformat()} "
-        f"(content sha256 `{spec.approval.content_sha256[:12]}...`)."
+        f"(content sha256 `{spec.approval.content_sha256[:12]}...`; "
+        f"{spec.approval.identity_line()})."
         if spec.approval
         else "Spec not yet approved - this plan is a preview."
     )

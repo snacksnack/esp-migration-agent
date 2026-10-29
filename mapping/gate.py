@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from ingest.mailchimp import bundle_fingerprint
 from specs.model import (
     PROVENANCE_FIELDS,
+    ApproverIdentity,
     MappingSpec,
     MappingStatus,
     SpecStatus,
@@ -51,12 +52,19 @@ def load_spec(path: Path) -> MappingSpec:
         raise GateError(f"spec at {path} does not validate: {exc}") from exc
 
 
-def approve(spec: MappingSpec, approved_by: str, now: datetime | None = None) -> MappingSpec:
+def approve(
+    spec: MappingSpec,
+    approved_by: str,
+    now: datetime | None = None,
+    identity: ApproverIdentity | None = None,
+) -> MappingSpec:
     """Stamp an approval onto a fully reviewed spec.
 
     The content hash is computed over the spec exactly as it will persist
     (status already approved, approval block excluded), so load_approved can
-    recompute and compare byte-for-byte semantics."""
+    recompute and compare byte-for-byte semantics. identity (RC1-554) is how
+    the approver was authenticated; it rides in the approval block, outside
+    the hash, like the name."""
     unresolved = [m for m in spec.reviewed_mappings() if m.status in UNRESOLVED]
     if unresolved:
         labels = ", ".join(mapping_label(m) for m in unresolved)
@@ -76,6 +84,8 @@ def approve(spec: MappingSpec, approved_by: str, now: datetime | None = None) ->
         "approved_at": (now or datetime.now(UTC)).isoformat(),
         "content_sha256": hash_content(content),
     }
+    if identity is not None:
+        approval["identity"] = identity.model_dump(mode="json")
     return MappingSpec.model_validate({**content, "approval": approval})
 
 

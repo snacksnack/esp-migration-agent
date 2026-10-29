@@ -31,10 +31,21 @@ export interface ConsentMapping extends ReviewedBase {
   target_status: string | null
 }
 
+// How the approver authenticated (RC1-554). verified only for IdP sign-in.
+export interface ApproverIdentity {
+  method: 'oidc' | 'password'
+  verified: boolean
+  issuer: string | null
+  subject: string | null
+  email: string | null
+  name: string | null
+}
+
 export interface Approval {
   approved_by: string
   approved_at: string
   content_sha256: string
+  identity?: ApproverIdentity | null
 }
 
 export interface Spec {
@@ -59,6 +70,22 @@ export interface ApproveResult {
   approved_by: string
   approved_at: string
   content_sha256: string
+  identity?: ApproverIdentity | null
+}
+
+export interface AuditRecord {
+  seq: number
+  at: string
+  event: string
+  actor: {
+    method: string
+    verified: boolean
+    email?: string
+    name?: string
+    issuer?: string
+  }
+  detail: Record<string, unknown>
+  sha256: string
 }
 
 export interface Report {
@@ -174,6 +201,20 @@ async function unwrap<T>(resp: Response): Promise<T> {
 export interface Me {
   authenticated: boolean
   auth_enabled: boolean
+  password_enabled?: boolean
+  sso_provider?: string | null
+  identity?: ApproverIdentity | null
+}
+
+// Full-page navigation, not fetch: the IdP's login page is the customer's.
+export const SSO_START_URL = '/api/auth/sso/start'
+
+export function logout(): Promise<{ ok: boolean }> {
+  return fetch('/api/logout', { method: 'POST' }).then((r) => unwrap<{ ok: boolean }>(r))
+}
+
+export function getAudit(): Promise<{ records: AuditRecord[] }> {
+  return fetch('/api/audit?limit=50').then((r) => unwrap<{ records: AuditRecord[] }>(r))
 }
 
 export function getMe(): Promise<Me> {
@@ -204,10 +245,11 @@ export function resolveMapping(view: MappingView, resolution: Resolution): Promi
   }).then((r) => unwrap<SpecResponse>(r))
 }
 
-export function approveSpec(approvedBy: string): Promise<ApproveResult> {
+// approvedBy is omitted under a verified SSO identity: the IdP's name is the name.
+export function approveSpec(approvedBy?: string): Promise<ApproveResult> {
   return fetch('/api/approve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ approved_by: approvedBy }),
+    body: JSON.stringify(approvedBy ? { approved_by: approvedBy } : {}),
   }).then((r) => unwrap<ApproveResult>(r))
 }
