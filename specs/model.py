@@ -106,12 +106,42 @@ class SuppressionPolicy(BaseModel):
     source_statuses: list[str] = ["unsubscribed", "cleaned"]
 
 
+class ApproverIdentity(BaseModel):
+    """Who signed off, as established by the sign-in rather than typed into a
+    box (RC1-554). verified=True only for an IdP-federated login; the demo's
+    shared password records method="password" and verified=False, so a report
+    never presents a typed name as an authenticated one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    method: Literal["oidc", "password"]
+    verified: bool
+    issuer: str | None = None  # the IdP's OIDC issuer URL
+    subject: str | None = None  # the IdP's stable user id (sub claim)
+    email: str | None = None
+    name: str | None = None
+
+    def describe(self) -> str:
+        if self.method == "oidc":
+            who = self.email or self.subject
+            return f"verified via OIDC ({self.issuer}, sub {self.subject}, {who})"
+        return "unverified: shared demo password, name typed by the approver"
+
+
 class Approval(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     approved_by: str = Field(min_length=1)
     approved_at: datetime
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # RC1-554. Outside the content hash (the approval block always is), and
+    # omitted from YAML when unset, so earlier approvals stay byte-identical.
+    identity: ApproverIdentity | None = None
+
+    def identity_line(self) -> str:
+        if self.identity is None:
+            return "identity not recorded (CLI or pre-RC1-554 approval; name is free text)"
+        return self.identity.describe()
 
 
 # Optional provenance fields the approval binds when present; unset fields
@@ -187,7 +217,10 @@ class MappingSpec(BaseModel):
         return cls.model_validate(yaml.safe_load(text))
 
     def to_yaml(self) -> str:
+        exclude: dict = dict.fromkeys(self._unset_provenance(), True)
+        if self.approval is not None and self.approval.identity is None:
+            exclude["approval"] = {"identity": True}
         return yaml.safe_dump(
-            self.model_dump(mode="json", exclude=self._unset_provenance() or None),
+            self.model_dump(mode="json", exclude=exclude or None),
             sort_keys=False,
         )
