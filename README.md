@@ -63,7 +63,12 @@ Mailchimp; Listmonk and Brevo already sit behind the same `--target` flag.
   Live demo at [esp.hihelloreid.com](https://esp.hihelloreid.com):
   fixture-seeded, fully browsable by anyone - including tripping the gate's
   verbatim refusal - while every write (resolving, signing off) is the
-  approver's alone, explained by a demo-mode dialog (ADR-0011/0012)
+  approver's alone, explained by a demo-mode dialog (ADR-0011/0012).
+  Sign-off goes through the customer's IdP (Okta, OIDC): the approval, the
+  cutover plan and the reconciliation report carry the IdP-verified
+  identity, a hash-chained audit log records every gate decision, and a user
+  deactivated in Okta loses access at their next write (ADR-0021; customer
+  IdP setup in docs/sso_runbook.md)
 - `executor/` - deterministic executor (ADR-0006/0007): plan builder with
   the suppression invariant, Listmonk + Brevo adapters behind one protocol
   (`--target`), dry-run diff, idempotent execution, reconciliation report,

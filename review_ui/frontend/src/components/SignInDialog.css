@@ -59,3 +59,18 @@
   font-size: 0.85rem;
   margin: 0;
 }
+.sd-sso {
+  display: grid;
+  gap: 6px;
+}
+.sd-sso-button {
+  display: inline-block;
+  text-align: center;
+  border: 1px solid var(--bar);
+  background: var(--bar);
+  color: var(--page);
+  border-radius: 6px;
+  padding: 8px 12px;
+  text-decoration: none;
+  font-weight: 600;
+}

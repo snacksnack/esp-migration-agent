@@ -45,7 +45,9 @@ def client(spec_path: Path, tmp_path: Path) -> TestClient:
         approved_dir=tmp_path / "approved",
         # Gate off, pinned: tests never read .env (repo convention), and this
         # file tests the API semantics, not the RC1-561 password gate.
-        settings=ReviewUiSettings(review_password=None, _env_file=None),
+        settings=ReviewUiSettings(
+            review_password=None, audit_log=tmp_path / "audit.jsonl", _env_file=None
+        ),
     )
     return TestClient(app)
 
