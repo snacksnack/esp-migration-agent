@@ -9,3 +9,5 @@ htmlcov/
 dist/
 node_modules/
 .review_audit.jsonl
+.env.neon
+.env.neon.owner
