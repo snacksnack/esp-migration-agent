@@ -120,10 +120,20 @@ describe('SSO sign-in (RC1-554)', () => {
         sha256: 'd'.repeat(64),
       },
     ]
+    records.push({
+      seq: 0,
+      at: '2026-10-29T11:59:00Z',
+      event: 'service_start',
+      actor: { method: 'anonymous', verified: false },
+      detail: { spec: 'mailchimp_to_listmonk.yaml', spec_status: 'draft' },
+      sha256: 'e'.repeat(64),
+    })
     render(<AuditPanel records={records} />)
     const rows = screen.getAllByRole('listitem').map((li) => li.textContent)
     expect(rows[0]).toContain('dana@customer.example access revoked by the IdP')
     expect(rows[1]).toContain('demo approver (unverified) resolved a mapping')
     expect(rows[1]).toContain('field ZIP → edited')
+    expect(rows[2]).toContain('system restarted the service')
+    expect(rows[2]).toContain('spec status: draft')
   })
 })

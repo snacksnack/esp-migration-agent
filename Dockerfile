@@ -27,7 +27,7 @@ COPY ingest/ ./ingest/
 COPY discovery/ ./discovery/
 COPY mapping/ ./mapping/
 COPY telemetry/ ./telemetry/
-COPY review_ui/__init__.py review_ui/__main__.py review_ui/api.py review_ui/auth.py review_ui/config.py review_ui/oidc.py review_ui/audit.py ./review_ui/
+COPY review_ui/__init__.py review_ui/__main__.py review_ui/api.py review_ui/auth.py review_ui/config.py review_ui/oidc.py review_ui/audit.py review_ui/pgstore.py review_ui/db_setup.py review_ui/schema.sql ./review_ui/
 COPY fixtures/ ./fixtures/
 COPY --from=web /web/dist ./review_ui/frontend/dist
 

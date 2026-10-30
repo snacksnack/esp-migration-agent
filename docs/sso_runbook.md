@@ -97,13 +97,16 @@ machine, and the next page load shows **Sign in with Okta**.
   push revocation (SCIM) is a planned follow-up.
 - **If the IdP is down,** changes are refused with a 503 and nothing is
   written. Reading still works.
-- **Sessions** last 8 hours (`ESP_OIDC_SESSION_HOURS`). A server restart ends
-  every SSO session, because the gate cannot re-check a token it no longer
-  holds.
+- **Sessions** last 8 hours (`ESP_OIDC_SESSION_HOURS`).
 - **Rotating the client secret:** create a second secret in Okta, update it
   with `fly secrets set`, then deactivate the old one.
-- **The audit log** is append-only and hash-chained. To check a copy:
-  `uv run python -c "from pathlib import Path; from review_ui.audit import
-  verify_chain; print(verify_chain(Path('audit.jsonl')))"` (an empty list
-  means intact). On the hosted demo it resets on restart along with the
-  spec. Each record is also in the Fly log stream.
+- **The audit log** lives in Postgres on the hosted demo (ADR-0022): the
+  database refuses UPDATE, DELETE and TRUNCATE, every record is
+  hash-chained, and it survives restarts (the spec does not; each start
+  logs a `service_start` record saying so). Check it with
+  `uv run --group ui python -m review_ui.db_setup verify`: chain intact and
+  all three rewrites refused, as the app role. Each record is also in the
+  Fly log stream. Without a database it falls back to an append-only file.
+- **SSO sessions** survive deploys and restarts (refresh tokens encrypted at
+  rest), so "a restart ends every SSO session" applies only to deploys
+  without a database.

@@ -30,6 +30,8 @@ ui = [
     "authlib>=1.6",
     "fastapi>=0.115",
     "itsdangerous>=2.2",
+    "psycopg-pool>=3.2",
+    "psycopg[binary]>=3.2",
     "uvicorn>=0.30",
 ]
 # The shared eval harness (RC1-548), pinned by tag: if the ruler can move

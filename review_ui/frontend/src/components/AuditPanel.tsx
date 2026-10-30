@@ -13,9 +13,12 @@ const EVENT_LABELS: Record<string, string> = {
   mapping_resolved: 'resolved a mapping',
   approval_refused: 'approval refused by the gate',
   spec_approved: 'approved the spec',
+  service_start: 'restarted the service; the spec reset to its committed draft',
 }
 
-function actorName(actor: AuditRecord['actor']): string {
+function actorName(record: AuditRecord): string {
+  const { actor } = record
+  if (record.event === 'service_start') return 'system'
   if (actor.method === 'anonymous') return 'anonymous'
   if (actor.method === 'password') return 'demo approver (unverified)'
   return actor.email ?? actor.name ?? 'unknown'
@@ -26,6 +29,7 @@ function summary(record: AuditRecord): string {
   if (record.event === 'mapping_resolved')
     return `${d.kind} ${String(d.source)} → ${String(d.status)}`
   if (record.event === 'spec_approved') return `sha256 ${String(d.content_sha256).slice(0, 12)}…`
+  if (record.event === 'service_start') return `spec status: ${String(d.spec_status)}`
   if (typeof d.reason === 'string') return d.reason
   return ''
 }
@@ -42,7 +46,7 @@ export default function AuditPanel({ records }: AuditPanelProps) {
         <li key={r.seq} className="audit-row">
           <span className="audit-at">{r.at.replace('T', ' ').replace('Z', ' UTC')}</span>
           <span>
-            <strong>{actorName(r.actor)}</strong> {EVENT_LABELS[r.event] ?? r.event}
+            <strong>{actorName(r)}</strong> {EVENT_LABELS[r.event] ?? r.event}
           </span>
           <span className="audit-detail">{summary(r)}</span>
         </li>
