@@ -56,7 +56,13 @@ proposes, deterministic Python validates, a human approves.
   password = unverified), the refresh token is re-checked server-side before
   writes (deactivated at the IdP = 401 at next click, fail closed), and
   `review_ui/audit.py` hash-chains every gate decision. Session = Starlette
-  signed cookie. Customer setup: docs/sso_runbook.md. ESP_REVIEW_PASSWORD
+  signed cookie. Customer setup: docs/sso_runbook.md. RC1-576 (ADR-0022):
+  ESP_DATABASE_URL = audit log + SSO sessions in Neon Postgres
+  (`review_ui/pgstore.py`, schema `review_ui/schema.sql`, setup CLI
+  `python -m review_ui.db_setup`); app role esp_app is INSERT/SELECT-only on
+  review_audit and triggers refuse UPDATE/DELETE/TRUNCATE. Neon creds live in
+  .env.neon / .env.neon.owner, NEVER .env. pgstore tests need
+  ESP_TEST_DATABASE_URL (CI has a postgres:18 service). ESP_REVIEW_PASSWORD
   and ESP_OIDC_* unset = everything open, so dev/CI/tests are untouched.
   No volume; restart = pristine fixture. Deploys via fly-deploy.yml on CI green (not the e2e).
 - `executor/` - Phases 3-4 (ADR-0006/0007): plan builder, target adapters

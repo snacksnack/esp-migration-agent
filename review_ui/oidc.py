@@ -160,42 +160,55 @@ class OidcProvider:
 
 
 @dataclass
-class _Grant:
+class Grant:
     refresh_token: str
-    checked_at: float
+    checked_at: float  # wall-clock epoch seconds, comparable across restarts
 
 
 class SessionStore:
-    """sid -> refresh token + when the IdP last confirmed it. In memory: the
-    Fly machine suspends rather than stops (memory survives), and when it
-    does restart, losing this means a fresh sign-in - the safe direction."""
+    """sid -> refresh token + when the IdP last confirmed it.
+
+    This base class holds the confirmation rule and keeps grants in memory
+    (dev, CI, deploys without a database): a restart forgets them, which
+    means a fresh sign-in - the safe direction. review_ui.pgstore
+    (RC1-576) overrides the three storage hooks to keep them in Postgres,
+    encrypted, so deploys stop signing SSO users out."""
 
     def __init__(self):
-        self._grants: dict[str, _Grant] = {}
+        self._grants: dict[str, Grant] = {}
         self._lock = threading.Lock()
 
-    def put(self, sid: str, refresh_token: str) -> None:
+    # Storage hooks: overridden by PostgresSessionStore.
+    def _load(self, sid: str) -> Grant | None:
         with self._lock:
-            self._grants[sid] = _Grant(refresh_token, time.monotonic())
+            return self._grants.get(sid)
+
+    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> None:
+        with self._lock:
+            self._grants[sid] = grant
+
+    def _drop(self, sid: str) -> Grant | None:
+        with self._lock:
+            return self._grants.pop(sid, None)
+
+    def put(self, sid: str, refresh_token: str, ttl_seconds: int) -> None:
+        self._save(sid, Grant(refresh_token, time.time()), ttl_seconds)
 
     def pop(self, sid: str) -> str | None:
-        with self._lock:
-            grant = self._grants.pop(sid, None)
+        grant = self._drop(sid)
         return grant.refresh_token if grant else None
 
     def confirm(self, sid: str, provider: IdentityProvider, max_age: float) -> bool:
         """True while the IdP still vouches for this session. Asks the IdP
         only when the last confirmation is older than max_age."""
-        with self._lock:
-            grant = self._grants.get(sid)
+        grant = self._load(sid)
         if grant is None:
             return False
-        if time.monotonic() - grant.checked_at < max_age:
+        if time.time() - grant.checked_at < max_age:
             return True
         rotated = provider.refresh(grant.refresh_token)
-        with self._lock:
-            if rotated is None:
-                self._grants.pop(sid, None)
-                return False
-            self._grants[sid] = _Grant(rotated, time.monotonic())
+        if rotated is None:
+            self._drop(sid)
+            return False
+        self._save(sid, Grant(rotated, time.time()), None)
         return True
