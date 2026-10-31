@@ -3,6 +3,7 @@
 #   fly secrets set ESP_REVIEW_PASSWORD=... ESP_REVIEW_SESSION_SECRET=...
 #   fly secrets set ESP_OIDC_ISSUER=... ESP_OIDC_CLIENT_ID=... ESP_OIDC_CLIENT_SECRET=...
 #     (RC1-554 SSO; IdP-side setup in docs/sso_runbook.md)
+#   fly secrets import < .env.neon   # RC1-576 durable state; see review_ui/db_setup.py
 #   fly deploy                      # or let fly-deploy.yml do it on CI green
 #   fly certs add esp.hihelloreid.com   # then add the CNAME it prints
 # No volume on purpose: the demo's state is the baked-in fixture spec, and a

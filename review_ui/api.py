@@ -57,6 +57,12 @@ from review_ui.oidc import (
     SessionStore,
     SsoError,
 )
+from review_ui.pgstore import (
+    PostgresAuditLog,
+    PostgresSessionStore,
+    check_ready,
+    open_pool,
+)
 from specs.model import ApproverIdentity, MappingSpec, MappingStatus
 from telemetry import count
 
@@ -119,9 +125,29 @@ def create_app(
     settings = settings or ReviewUiSettings()
     if provider is None and settings.sso_enabled:
         provider = OidcProvider(settings)
-    sessions = SessionStore()
-    audit = AuditLog(settings.audit_log)
+    # Durable state when a database is configured (RC1-576, ADR-0022);
+    # otherwise the JSONL file and process memory, exactly as before.
+    if settings.database_url:
+        if not settings.session_token_key:
+            raise ValueError(
+                "ESP_DATABASE_URL is set but ESP_SESSION_TOKEN_KEY is not; refresh "
+                "tokens are never stored unencrypted"
+            )
+        pool = open_pool(settings.database_url)
+        check_ready(pool)
+        sessions: SessionStore = PostgresSessionStore(pool, settings.session_token_key)
+        audit: AuditLog | PostgresAuditLog = PostgresAuditLog(pool)
+        # The spec resets to the baked-in file on every start (ADR-0011);
+        # the log no longer does, so it says so rather than leaving a spec
+        # approved yesterday unexplained today.
+        spec_status = _load(spec_path).status
+        audit.record("service_start", None, spec=spec_path.name, spec_status=str(spec_status))
+    else:
+        pool = None
+        sessions = SessionStore()
+        audit = AuditLog(settings.audit_log)
     app = FastAPI(title="ESP migration review gate", docs_url=None, redoc_url=None)
+    app.state.pool = pool  # closed by the owner of the process (tests close it)
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.review_session_secret,
@@ -230,7 +256,7 @@ def create_app(
             audit.record("sign_in_refused", None, provider=provider.name, reason=str(exc))
             return RedirectResponse(f"/?sso_error={quote(str(exc))}", status_code=303)
         sid = auth.sign_in(request, signin.identity, settings.oidc_session_hours * 3600)
-        sessions.put(sid, signin.refresh_token)
+        sessions.put(sid, signin.refresh_token, settings.oidc_session_hours * 3600)
         audit.record("sign_in", signin.identity, provider=provider.name)
         return RedirectResponse("/", status_code=303)
 

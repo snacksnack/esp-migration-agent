@@ -56,6 +56,15 @@ class ReviewUiSettings(BaseSettings):
     # logged to stdout.
     audit_log: Path = Path(".review_audit.jsonl")
 
+    # Durable state (RC1-576, ADR-0022): with a database URL the audit log and
+    # SSO sessions live in Postgres (Neon on the hosted demo) instead of the
+    # file above and process memory. The URL is the least-privilege app role,
+    # never the owner. The token key encrypts refresh tokens at rest (Fernet;
+    # generate with `python -m review_ui.db_setup new-key`) and is required
+    # whenever the database is.
+    database_url: str | None = Field(default=None, repr=False)
+    session_token_key: str | None = Field(default=None, repr=False)
+
     @property
     def sso_enabled(self) -> bool:
         return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
