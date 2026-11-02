@@ -70,3 +70,11 @@ CREATE TABLE IF NOT EXISTS review_scim_users (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS review_scim_users_user_name
     ON review_scim_users (lower(user_name));
+
+-- RC1-575 follow-up: a revoked session stays as a marker until it expires,
+-- so concurrent requests that discover the revocation write exactly one
+-- access_revoked record between them (the one that flips
+-- revocation_audited).
+ALTER TABLE review_sso_sessions ADD COLUMN IF NOT EXISTS revoked_at timestamptz;
+ALTER TABLE review_sso_sessions
+    ADD COLUMN IF NOT EXISTS revocation_audited boolean NOT NULL DEFAULT false;

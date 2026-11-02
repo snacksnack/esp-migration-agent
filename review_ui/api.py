@@ -198,16 +198,18 @@ def create_app(
             auth.sign_out(request)
             return None
         try:
-            ok = sessions.confirm(sid, provider, settings.oidc_recheck_seconds)
+            state = sessions.check(sid, provider, settings.oidc_recheck_seconds)
         except IdpUnavailable as exc:
             raise HTTPException(
                 status_code=503,
                 detail=f"could not confirm your identity with {provider.name} ({exc}); "
                 "nothing was changed - try again shortly",
             ) from exc
-        if not ok:
+        if state != "live":
             request.state.revoked_by = provider.name
             auth.sign_out(request)
+            if state == "revoked" and not sessions.claim_revocation(sid):
+                return None  # a concurrent request already recorded it
             audit.record(
                 "access_revoked",
                 identity,

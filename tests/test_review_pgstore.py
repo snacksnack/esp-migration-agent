@@ -178,7 +178,7 @@ def test_sso_sessions_and_the_chain_survive_a_restart(tmp_path, db, apps):
     assert verify(db) == []  # one chain across both processes
 
 
-def test_deactivation_still_ends_access_and_deletes_the_grant(tmp_path, db, apps):
+def test_deactivation_still_ends_access_and_revokes_the_grant(tmp_path, db, apps):
     idp = FakeIdp()
     client = apps(tmp_path, idp, db, KEY)
     sso_login(client)
@@ -188,7 +188,9 @@ def test_deactivation_still_ends_access_and_deletes_the_grant(tmp_path, db, apps
         "/api/mappings/consent/0", json={"source": "subscribed", "status": "approved"}
     )
     assert resp.status_code == 401
-    assert admin_rows("SELECT count(*) FROM review_sso_sessions") == [(0,)]
+    assert admin_rows(
+        "SELECT count(*) FROM review_sso_sessions WHERE revoked_at IS NULL"
+    ) == [(0,)]
     assert events()[-1] == "access_revoked"
 
 
@@ -282,8 +284,14 @@ def test_scim_deactivation_ends_postgres_sessions_and_survives_a_restart(tmp_pat
     restarted.cookies.update(first.cookies)
     resp = restarted.patch(f"/scim/v2/Users/{dana_id}", json=deactivate_patch(), headers=OKTA)
     assert resp.status_code == 200 and resp.json()["active"] is False
-    assert admin_rows("SELECT email FROM review_sso_sessions") == [("sam@customer.example",)]
+    assert admin_rows(
+        "SELECT email FROM review_sso_sessions WHERE revoked_at IS NULL"
+    ) == [("sam@customer.example",)]
+    dana_cookie = dict(restarted.cookies)
     assert restarted.get("/api/me").json()["revoked_by"] == "Okta"
+    # A second request racing the first (same cookie) is told, not re-logged.
+    late = TestClient(restarted.app, follow_redirects=False, cookies=dana_cookie)
+    assert late.get("/api/me").json()["revoked_by"] == "Okta"
     assert idp.refresh_calls == 0  # pushed, not polled
     assert events()[-2:] == ["scim_deactivated", "access_revoked"]
     dup = restarted.post("/scim/v2/Users", json=okta_user("DANA"), headers=OKTA)

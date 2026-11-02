@@ -21,7 +21,7 @@ import contextlib
 import threading
 import time
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
 from authlib.integrations.starlette_client import OAuth, OAuthError
@@ -167,6 +167,14 @@ class Grant:
     # every session of a deprovisioned user without waiting for a click.
     subject: str | None = None
     email: str | None = None
+    # A revoked grant stays behind as a marker until it expires, so that of
+    # several requests discovering the revocation at once, exactly one
+    # claims it and writes the access_revoked record (RC1-575).
+    revoked: bool = False
+    audited: bool = False
+
+
+SessionState = Literal["live", "revoked", "missing"]
 
 
 def owned_by(grant: Grant, subjects: set[str], emails: set[str]) -> bool:
@@ -197,18 +205,38 @@ class SessionStore:
 
     def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> None:
         with self._lock:
+            current = self._grants.get(sid)
+            if ttl_seconds is None and (current is None or current.revoked):
+                return  # a rotation never outlives a revocation or sign-out
             self._grants[sid] = grant
 
     def _drop(self, sid: str) -> Grant | None:
         with self._lock:
             return self._grants.pop(sid, None)
 
-    def _drop_owned(self, subjects: set[str], emails: set[str]) -> int:
+    def _revoke(self, sid: str) -> None:
         with self._lock:
-            doomed = [sid for sid, g in self._grants.items() if owned_by(g, subjects, emails)]
+            grant = self._grants.get(sid)
+            if grant is not None:
+                self._grants[sid] = replace(grant, revoked=True)
+
+    def _revoke_owned(self, subjects: set[str], emails: set[str]) -> int:
+        with self._lock:
+            doomed = [
+                sid for sid, g in self._grants.items()
+                if not g.revoked and owned_by(g, subjects, emails)
+            ]
             for sid in doomed:
-                del self._grants[sid]
+                self._grants[sid] = replace(self._grants[sid], revoked=True)
             return len(doomed)
+
+    def _claim(self, sid: str) -> bool:
+        with self._lock:
+            grant = self._grants.get(sid)
+            if grant is None or not grant.revoked or grant.audited:
+                return False
+            self._grants[sid] = replace(grant, audited=True)
+            return True
 
     def put(
         self, sid: str, refresh_token: str, ttl_seconds: int, identity: ApproverIdentity
@@ -218,8 +246,8 @@ class SessionStore:
 
     def end_sessions(self, subjects: set[str], emails: set[str]) -> int:
         """End every session belonging to the user (RC1-575); returns how
-        many. Their next request finds no grant and is signed out."""
-        return self._drop_owned(
+        many. Their next request finds the grant revoked and is signed out."""
+        return self._revoke_owned(
             {s for s in subjects if s}, {e.lower() for e in emails if e}
         )
 
@@ -227,17 +255,26 @@ class SessionStore:
         grant = self._drop(sid)
         return grant.refresh_token if grant else None
 
-    def confirm(self, sid: str, provider: IdentityProvider, max_age: float) -> bool:
-        """True while the IdP still vouches for this session. Asks the IdP
-        only when the last confirmation is older than max_age."""
+    def check(self, sid: str, provider: IdentityProvider, max_age: float) -> SessionState:
+        """live while the IdP still vouches for this session (asking it only
+        when the last confirmation is older than max_age); revoked when the
+        IdP has said no, by push or on refresh; missing when there is no
+        grant at all (restart without a database, expiry, key rotation)."""
         grant = self._load(sid)
         if grant is None:
-            return False
+            return "missing"
+        if grant.revoked:
+            return "revoked"
         if time.time() - grant.checked_at < max_age:
-            return True
+            return "live"
         rotated = provider.refresh(grant.refresh_token)
         if rotated is None:
-            self._drop(sid)
-            return False
+            self._revoke(sid)
+            return "revoked"
         self._save(sid, replace(grant, refresh_token=rotated, checked_at=time.time()), None)
-        return True
+        return "live"
+
+    def claim_revocation(self, sid: str) -> bool:
+        """True for exactly one caller per revoked session: the one that
+        should write the access_revoked record."""
+        return self._claim(sid)
