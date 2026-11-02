@@ -143,17 +143,19 @@ class PostgresSessionStore(SessionStore):
             return None
         return Grant(token, row[1].timestamp(), row[2], row[3])
 
-    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> None:
+    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> bool:
         encrypted = self._fernet.encrypt(grant.refresh_token.encode()).decode()
         checked_at = datetime.fromtimestamp(grant.checked_at, UTC)
         with self._pool.connection() as conn, conn.transaction():
             if ttl_seconds is None:  # rotation: keep the session's expiry
-                conn.execute(
+                cur = conn.execute(
                     "UPDATE review_sso_sessions SET refresh_token_enc = %s, checked_at = %s"
                     " WHERE sid = %s AND revoked_at IS NULL",
                     (encrypted, checked_at, sid),
                 )
-                return
+                # 0 rows: revoked or dropped mid-refresh, so the rotation is
+                # not ours to keep and check() must fail closed (RC1-582).
+                return cur.rowcount == 1
             conn.execute("DELETE FROM review_sso_sessions WHERE expires_at <= now()")
             conn.execute(
                 "INSERT INTO review_sso_sessions"
@@ -169,6 +171,7 @@ class PostgresSessionStore(SessionStore):
                     grant.subject, grant.email,
                 ),
             )
+        return True
 
     def _drop(self, sid: str) -> Grant | None:
         grant = self._load(sid)

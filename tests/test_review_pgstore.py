@@ -20,6 +20,7 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from mapping.gate import load_spec
 from review_ui import auth
 from review_ui.api import create_app
 from review_ui.config import ReviewUiSettings
@@ -298,3 +299,29 @@ def test_scim_deactivation_ends_postgres_sessions_and_survives_a_restart(tmp_pat
     assert dup.status_code == 409  # the unique index is case-insensitive
     assert sso_login(restarted).headers["location"].startswith("/?sso_error=")
     assert verify(db) == []
+
+
+def test_revocation_during_a_refresh_does_not_authorize_the_write(tmp_path, db, apps):
+    """RC1-582, against the real guard: the UPDATE carries
+    `WHERE revoked_at IS NULL`, so a revocation landing mid-refresh matches no
+    row and the write must be refused rather than allowed through once."""
+    idp = FakeIdp()
+    client = apps(tmp_path, idp, db, KEY)
+    sso_login(client)
+    answer = idp.refresh
+
+    def revoke_mid_refresh(refresh_token: str) -> str | None:
+        with psycopg.connect(ADMIN_URL) as conn:  # the SCIM push, mid-flight
+            conn.execute(
+                "UPDATE review_sso_sessions SET revoked_at = now()"
+                " WHERE revoked_at IS NULL"
+            )
+        return answer(refresh_token)
+
+    idp.refresh = revoke_mid_refresh
+    resp = client.patch(
+        "/api/mappings/consent/0", json={"source": "subscribed", "status": "approved"}
+    )
+    assert resp.status_code == 401
+    assert load_spec(tmp_path / DRAFT.name).consent_mappings[0].status.value == "proposed"
+    assert client.get("/api/me").json()["authenticated"] is False

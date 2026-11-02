@@ -203,12 +203,16 @@ class SessionStore:
         with self._lock:
             return self._grants.get(sid)
 
-    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> None:
+    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> bool:
+        """True when the grant was stored. False means a rotation lost a race
+        with a revocation or sign-out (RC1-582), and the caller must not treat
+        the session as live."""
         with self._lock:
             current = self._grants.get(sid)
             if ttl_seconds is None and (current is None or current.revoked):
-                return  # a rotation never outlives a revocation or sign-out
+                return False  # a rotation never outlives a revocation or sign-out
             self._grants[sid] = grant
+            return True
 
     def _drop(self, sid: str) -> Grant | None:
         with self._lock:
@@ -258,8 +262,9 @@ class SessionStore:
     def check(self, sid: str, provider: IdentityProvider, max_age: float) -> SessionState:
         """live while the IdP still vouches for this session (asking it only
         when the last confirmation is older than max_age); revoked when the
-        IdP has said no, by push or on refresh; missing when there is no
-        grant at all (restart without a database, expiry, key rotation)."""
+        IdP has said no, by push or on refresh, or revoked a rotation out
+        from under us mid-flight; missing when there is no grant at all
+        (restart without a database, expiry, key rotation)."""
         grant = self._load(sid)
         if grant is None:
             return "missing"
@@ -271,7 +276,15 @@ class SessionStore:
         if rotated is None:
             self._revoke(sid)
             return "revoked"
-        self._save(sid, replace(grant, refresh_token=rotated, checked_at=time.time()), None)
+        stored = self._save(
+            sid, replace(grant, refresh_token=rotated, checked_at=time.time()), None
+        )
+        if not stored:
+            # A revocation (SCIM push or sign-out) landed while the refresh was
+            # in flight, so _save refused the write. The session is no longer
+            # ours to vouch for: fail closed rather than authorize this one
+            # request on a grant the store would not keep (RC1-582).
+            return "revoked"
         return "live"
 
     def claim_revocation(self, sid: str) -> bool:
