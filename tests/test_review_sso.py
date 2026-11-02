@@ -29,7 +29,7 @@ from review_ui import auth
 from review_ui.api import create_app
 from review_ui.audit import AuditLog, verify_chain
 from review_ui.config import ReviewUiSettings
-from review_ui.oidc import IdpUnavailable, OidcProvider, SignIn, SsoError
+from review_ui.oidc import IdpUnavailable, OidcProvider, SessionStore, SignIn, SsoError
 from specs.model import ApproverIdentity, MappingSpec, SpecStatus
 from tests.fake_target import FakeTarget
 
@@ -390,3 +390,79 @@ def test_oidc_provider_refresh_semantics():
     with pytest.raises(IdpUnavailable):
         okta_provider(unreachable).refresh("rt-1")
     okta_provider(unreachable).revoke("rt-1")  # best effort: never raises
+
+
+def test_revocation_during_a_refresh_does_not_authorize_the_request():
+    """RC1-582: a SCIM push can revoke the session while provider.refresh() is
+    still at the token endpoint. _save() refuses to store the rotation; check()
+    must report that rather than vouching for the session one last time."""
+    store = SessionStore()
+    identity = ApproverIdentity(
+        method="oidc",
+        verified=True,
+        issuer=ISSUER,
+        subject="00u-dana",
+        email="dana@customer.example",
+        name="Dana Ops",
+    )
+    store.put("sid-dana", "rt-dana-1", 3600, identity)
+
+    class RevokesMidRefresh:
+        """The IdP answers, but the deactivation lands before we store it."""
+
+        name = "Okta"
+
+        def __init__(self):
+            self.calls = 0
+
+        def refresh(self, refresh_token: str) -> str | None:
+            self.calls += 1
+            store.end_sessions({"00u-dana"}, set())
+            return "rt-dana-2"
+
+    provider = RevokesMidRefresh()
+    assert store.check("sid-dana", provider, 0) == "revoked"
+    assert provider.calls == 1
+    # and it stays revoked, without another round trip
+    assert store.check("sid-dana", provider, 0) == "revoked"
+    assert provider.calls == 1
+
+
+def test_a_failed_revocation_record_is_retried_not_lost():
+    """RC1-583: claiming the revocation and recording it must not come apart.
+    If the record fails, the claim is released so the next request writes it;
+    otherwise the event is lost for good."""
+    store = SessionStore()
+    identity = ApproverIdentity(
+        method="oidc",
+        verified=True,
+        issuer=ISSUER,
+        subject="00u-dana",
+        email="dana@customer.example",
+        name="Dana Ops",
+    )
+    store.put("sid-dana", "rt-dana-1", 3600, identity)
+    store.end_sessions({"00u-dana"}, set())
+
+    class FlakyAudit:
+        def __init__(self):
+            self.fail_next = True
+            self.recorded: list[str] = []
+
+        def record(self, event: str, actor, **detail) -> dict:
+            if self.fail_next:
+                self.fail_next = False
+                raise RuntimeError("audit insert failed")
+            self.recorded.append(event)
+            return {"event": event}
+
+    audit = FlakyAudit()
+    with pytest.raises(RuntimeError):
+        store.claim_and_record("sid-dana", audit, "access_revoked", identity)
+    assert audit.recorded == []
+    # The claim was released, so the next request still records it.
+    assert store.claim_and_record("sid-dana", audit, "access_revoked", identity) is True
+    assert audit.recorded == ["access_revoked"]
+    # And only once.
+    assert store.claim_and_record("sid-dana", audit, "access_revoked", identity) is False
+    assert audit.recorded == ["access_revoked"]

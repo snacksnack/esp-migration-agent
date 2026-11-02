@@ -177,6 +177,13 @@ class Grant:
 SessionState = Literal["live", "revoked", "missing"]
 
 
+class AuditSink(Protocol):
+    """What a session store needs of an audit log: review_ui.audit.AuditLog
+    and review_ui.pgstore.PostgresAuditLog both satisfy it."""
+
+    def record(self, event: str, actor: ApproverIdentity | None, **detail) -> dict: ...
+
+
 def owned_by(grant: Grant, subjects: set[str], emails: set[str]) -> bool:
     """Same matching rule for both stores: the IdP's user id, or any of the
     user's email addresses, case-insensitively."""
@@ -203,12 +210,16 @@ class SessionStore:
         with self._lock:
             return self._grants.get(sid)
 
-    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> None:
+    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> bool:
+        """True when the grant was stored. False means a rotation lost a race
+        with a revocation or sign-out (RC1-582), and the caller must not treat
+        the session as live."""
         with self._lock:
             current = self._grants.get(sid)
             if ttl_seconds is None and (current is None or current.revoked):
-                return  # a rotation never outlives a revocation or sign-out
+                return False  # a rotation never outlives a revocation or sign-out
             self._grants[sid] = grant
+            return True
 
     def _drop(self, sid: str) -> Grant | None:
         with self._lock:
@@ -238,6 +249,12 @@ class SessionStore:
             self._grants[sid] = replace(grant, audited=True)
             return True
 
+    def _release_claim(self, sid: str) -> None:
+        with self._lock:
+            grant = self._grants.get(sid)
+            if grant is not None and grant.audited:
+                self._grants[sid] = replace(grant, audited=False)
+
     def put(
         self, sid: str, refresh_token: str, ttl_seconds: int, identity: ApproverIdentity
     ) -> None:
@@ -258,8 +275,9 @@ class SessionStore:
     def check(self, sid: str, provider: IdentityProvider, max_age: float) -> SessionState:
         """live while the IdP still vouches for this session (asking it only
         when the last confirmation is older than max_age); revoked when the
-        IdP has said no, by push or on refresh; missing when there is no
-        grant at all (restart without a database, expiry, key rotation)."""
+        IdP has said no, by push or on refresh, or revoked a rotation out
+        from under us mid-flight; missing when there is no grant at all
+        (restart without a database, expiry, key rotation)."""
         grant = self._load(sid)
         if grant is None:
             return "missing"
@@ -271,10 +289,43 @@ class SessionStore:
         if rotated is None:
             self._revoke(sid)
             return "revoked"
-        self._save(sid, replace(grant, refresh_token=rotated, checked_at=time.time()), None)
+        stored = self._save(
+            sid, replace(grant, refresh_token=rotated, checked_at=time.time()), None
+        )
+        if not stored:
+            # A revocation (SCIM push or sign-out) landed while the refresh was
+            # in flight, so _save refused the write. The session is no longer
+            # ours to vouch for: fail closed rather than authorize this one
+            # request on a grant the store would not keep (RC1-582).
+            return "revoked"
         return "live"
 
     def claim_revocation(self, sid: str) -> bool:
         """True for exactly one caller per revoked session: the one that
         should write the access_revoked record."""
         return self._claim(sid)
+
+    def claim_and_record(
+        self,
+        sid: str,
+        audit: AuditSink,
+        event: str,
+        actor: ApproverIdentity | None,
+        **detail,
+    ) -> bool:
+        """Record a revoked session's event once, without losing it (RC1-583).
+
+        Claiming and recording must not come apart. Claiming first and
+        recording second is at-most-once: if the record fails, the claim is
+        already spent and no later request will write the event at all. Here
+        the claim is released when the record raises, so the next request
+        records it instead; PostgresSessionStore commits the two together and
+        closes the crash window too."""
+        if not self._claim(sid):
+            return False
+        try:
+            audit.record(event, actor, **detail)
+        except Exception:
+            self._release_claim(sid)
+            raise
+        return True

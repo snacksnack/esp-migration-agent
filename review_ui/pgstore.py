@@ -17,12 +17,12 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from cryptography.fernet import Fernet, InvalidToken
-from psycopg import errors
+from psycopg import Connection, errors
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from review_ui.audit import GENESIS, build_entry, log_entry, verify_records
-from review_ui.oidc import Grant, SessionStore
+from review_ui.oidc import AuditSink, Grant, SessionStore
 from review_ui.scim import ScimDirectory, ScimUser, UserNameTaken, matches
 from specs.model import ApproverIdentity
 
@@ -81,21 +81,31 @@ class PostgresAuditLog:
 
     def record(self, event: str, actor: ApproverIdentity | None, **detail) -> dict:
         with self._pool.connection() as conn, conn.transaction():
-            conn.execute("SELECT pg_advisory_xact_lock(%s)", (CHAIN_LOCK,))
-            tip = conn.execute(
-                "SELECT seq, sha256 FROM review_audit ORDER BY seq DESC LIMIT 1"
-            ).fetchone()
-            seq, prev = (tip[0], tip[1].strip()) if tip else (0, GENESIS)
-            entry = build_entry(seq + 1, prev, event, actor, detail)
-            conn.execute(
-                "INSERT INTO review_audit (seq, at, event, actor, detail, prev_sha256, sha256)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                (
-                    entry["seq"], entry["at"], entry["event"], Jsonb(entry["actor"]),
-                    Jsonb(entry["detail"]), entry["prev_sha256"], entry["sha256"],
-                ),
-            )
+            entry = self.record_within(conn, event, actor, **detail)
         log_entry(entry)
+        return entry
+
+    def record_within(
+        self, conn: Connection, event: str, actor: ApproverIdentity | None, **detail
+    ) -> dict:
+        """Append inside the caller's transaction (RC1-583), so the record
+        commits with whatever else that transaction decided - or rolls back
+        with it, leaving the chain intact. The caller logs the returned entry
+        after the commit."""
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (CHAIN_LOCK,))
+        tip = conn.execute(
+            "SELECT seq, sha256 FROM review_audit ORDER BY seq DESC LIMIT 1"
+        ).fetchone()
+        seq, prev = (tip[0], tip[1].strip()) if tip else (0, GENESIS)
+        entry = build_entry(seq + 1, prev, event, actor, detail)
+        conn.execute(
+            "INSERT INTO review_audit (seq, at, event, actor, detail, prev_sha256, sha256)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (
+                entry["seq"], entry["at"], entry["event"], Jsonb(entry["actor"]),
+                Jsonb(entry["detail"]), entry["prev_sha256"], entry["sha256"],
+            ),
+        )
         return entry
 
     def read(self, limit: int = 100) -> list[dict]:
@@ -143,17 +153,19 @@ class PostgresSessionStore(SessionStore):
             return None
         return Grant(token, row[1].timestamp(), row[2], row[3])
 
-    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> None:
+    def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> bool:
         encrypted = self._fernet.encrypt(grant.refresh_token.encode()).decode()
         checked_at = datetime.fromtimestamp(grant.checked_at, UTC)
         with self._pool.connection() as conn, conn.transaction():
             if ttl_seconds is None:  # rotation: keep the session's expiry
-                conn.execute(
+                cur = conn.execute(
                     "UPDATE review_sso_sessions SET refresh_token_enc = %s, checked_at = %s"
                     " WHERE sid = %s AND revoked_at IS NULL",
                     (encrypted, checked_at, sid),
                 )
-                return
+                # 0 rows: revoked or dropped mid-refresh, so the rotation is
+                # not ours to keep and check() must fail closed (RC1-582).
+                return cur.rowcount == 1
             conn.execute("DELETE FROM review_sso_sessions WHERE expires_at <= now()")
             conn.execute(
                 "INSERT INTO review_sso_sessions"
@@ -169,6 +181,7 @@ class PostgresSessionStore(SessionStore):
                     grant.subject, grant.email,
                 ),
             )
+        return True
 
     def _drop(self, sid: str) -> Grant | None:
         grant = self._load(sid)
@@ -193,6 +206,31 @@ class PostgresSessionStore(SessionStore):
                 (list(subjects), list(emails)),
             )
             return cur.rowcount
+
+    def claim_and_record(
+        self,
+        sid: str,
+        audit: AuditSink,
+        event: str,
+        actor: ApproverIdentity | None,
+        **detail,
+    ) -> bool:
+        """The claim and the record commit together (RC1-583): one
+        transaction, so a failed insert rolls the claim back and the next
+        request records the event instead of finding it already claimed."""
+        if not isinstance(audit, PostgresAuditLog):
+            return super().claim_and_record(sid, audit, event, actor, **detail)
+        with self._pool.connection() as conn, conn.transaction():
+            cur = conn.execute(
+                "UPDATE review_sso_sessions SET revocation_audited = true"
+                " WHERE sid = %s AND revoked_at IS NOT NULL AND NOT revocation_audited",
+                (sid,),
+            )
+            if cur.rowcount != 1:
+                return False
+            entry = audit.record_within(conn, event, actor, **detail)
+        log_entry(entry)
+        return True
 
     def _claim(self, sid: str) -> bool:
         # The row lock makes this the arbiter: of concurrent claimants,

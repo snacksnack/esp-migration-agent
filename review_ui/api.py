@@ -208,16 +208,19 @@ def create_app(
         if state != "live":
             request.state.revoked_by = provider.name
             auth.sign_out(request)
-            if state == "revoked" and not sessions.claim_revocation(sid):
-                return None  # a concurrent request already recorded it
-            audit.record(
-                "access_revoked",
-                identity,
-                reason=(
-                    f"{provider.name} no longer vouches for this session "
-                    "(user deactivated, token revoked, or server restarted)"
-                ),
+            reason = (
+                f"{provider.name} no longer vouches for this session "
+                "(user deactivated, token revoked, or server restarted)"
             )
+            if state == "revoked":
+                # Claimed and recorded together, so a failed write is retried
+                # by the next request rather than silently dropped (RC1-583).
+                # False means a concurrent request already recorded it.
+                sessions.claim_and_record(
+                    sid, audit, "access_revoked", identity, reason=reason
+                )
+            else:
+                audit.record("access_revoked", identity, reason=reason)
             return None
         return identity
 

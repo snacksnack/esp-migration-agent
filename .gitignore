@@ -11,3 +11,12 @@ node_modules/
 .review_audit.jsonl
 .env.neon
 .env.neon.owner
+
+# Editor swap/backup files: a vim swap for .env.neon was committed once
+# (RC1-581) and carried live credentials into a public repo. The .env rules
+# above do not match them, so match them by shape.
+*.swp
+*.swo
+*.swn
+*~
+.*.sw[a-p]
