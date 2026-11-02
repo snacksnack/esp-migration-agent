@@ -231,3 +231,16 @@ def test_delete_ends_sessions_and_removes_the_record(tmp_path):
 def test_production_refuses_scim_without_a_database(tmp_path):
     with pytest.raises(ValueError, match="ESP_SCIM_TOKEN needs ESP_DATABASE_URL"):
         scim_client(tmp_path, FakeIdp(), environment="production")
+
+
+def test_concurrent_requests_record_the_revocation_once(tmp_path):
+    # Live demo, 11-01: the tab's poll and its visibilitychange check landed
+    # together after the push, and both wrote access_revoked.
+    client = scim_client(tmp_path, FakeIdp())
+    dana_id = provision(client, "dana")
+    sso_login(client)
+    cookie = dict(client.cookies)
+    client.patch(f"/scim/v2/Users/{dana_id}", json=deactivate_patch(), headers=OKTA)
+    tabs = [TestClient(client.app, follow_redirects=False, cookies=cookie) for _ in range(3)]
+    assert all(me(tab)["revoked_by"] == "Okta" for tab in tabs)  # each tab is told
+    assert events(tmp_path).count("access_revoked") == 1  # the log says it once
