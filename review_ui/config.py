@@ -60,10 +60,15 @@ class ReviewUiSettings(BaseSettings):
     # SSO sessions live in Postgres (Neon on the hosted demo) instead of the
     # file above and process memory. The URL is the least-privilege app role,
     # never the owner. The token key encrypts refresh tokens at rest (Fernet;
-    # generate with `python -m review_ui.db_setup new-key`) and is required
+    # written by `python -m review_ui.db_setup create-app-role`) and is required
     # whenever the database is.
     database_url: str | None = Field(default=None, repr=False)
     session_token_key: str | None = Field(default=None, repr=False)
+
+    # SCIM 2.0 push deprovisioning (RC1-575, ADR-0023). The bearer token the
+    # IdP's provisioning connector presents; unset = no /scim/v2 endpoints.
+    # Generate with `python -m review_ui.db_setup scim-token`.
+    scim_token: str | None = Field(default=None, repr=False)
 
     @property
     def sso_enabled(self) -> bool:
@@ -72,6 +77,10 @@ class ReviewUiSettings(BaseSettings):
     @property
     def auth_enabled(self) -> bool:
         return bool(self.review_password) or self.sso_enabled
+
+    @property
+    def scim_enabled(self) -> bool:
+        return bool(self.scim_token)
 
     @property
     def oidc_redirect_uri(self) -> str:

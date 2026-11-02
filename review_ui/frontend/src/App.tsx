@@ -23,6 +23,7 @@ import IdentityBar from './components/IdentityBar'
 import MappingCard from './components/MappingCard'
 import ProfileCharts from './components/ProfileCharts'
 import StatusTiles from './components/StatusTiles'
+import { useSessionWatch } from './sessionWatch'
 import './App.css'
 
 const SECTIONS: { kind: MappingView['kind']; title: string }[] = [
@@ -42,9 +43,17 @@ export default function App() {
     new URLSearchParams(window.location.search).get('sso_error'),
   )
 
+  // Who ended the session, when the IdP did (RC1-575); shown until dismissed
+  // or the next sign-in.
+  const [revokedBy, setRevokedBy] = useState<string | null>(null)
+
   const refreshAuth = useCallback(() => {
     getMe()
-      .then(setMe)
+      .then((m) => {
+        setMe(m)
+        if (m.revoked_by) setRevokedBy(m.revoked_by)
+        else if (m.identity) setRevokedBy(null)
+      })
       .catch(() => setMe(null))
     getAudit()
       .then((r) => setAudit(r.records))
@@ -55,6 +64,8 @@ export default function App() {
     refreshAuth()
     if (ssoError) window.history.replaceState(null, '', window.location.pathname)
   }, [refreshAuth, ssoError])
+
+  useSessionWatch(me?.identity?.method === 'oidc', refreshAuth)
 
   const auth = useMemo<AuthState>(
     () => ({
@@ -112,6 +123,13 @@ export default function App() {
     <AuthContext.Provider value={auth}>
       <main className="app">
         {me?.auth_enabled && <IdentityBar onLogout={logout} />}
+        {revokedBy && (
+          <p className="app-error" role="alert">
+            {revokedBy} ended your session (account deactivated or access removed). Reading still
+            works; changes need a fresh sign-in.{' '}
+            <button onClick={() => setRevokedBy(null)}>Dismiss</button>
+          </p>
+        )}
         {ssoError && (
           <p className="app-error" role="alert">
             {ssoError} <button onClick={() => setSsoError(null)}>Dismiss</button>
