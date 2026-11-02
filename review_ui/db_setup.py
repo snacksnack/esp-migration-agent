@@ -3,6 +3,7 @@
     uv run --group ui python -m review_ui.db_setup migrate
     uv run --group ui python -m review_ui.db_setup create-app-role
     uv run --group ui python -m review_ui.db_setup verify
+    uv run --group ui python -m review_ui.db_setup scim-token
     fly secrets import -a esp-migration-demo < .env.neon
 
 Two credential files, both gitignored and both kept apart from .env so a
@@ -10,9 +11,9 @@ local `python -m review_ui` never writes to the live database by accident:
 
 - .env.neon.owner  ESP_DATABASE_OWNER_URL - the database owner; migrations
                    and role management only, never deployed.
-- .env.neon        ESP_DATABASE_URL (the least-privilege app role) and
-                   ESP_SESSION_TOKEN_KEY - exactly what the app gets, and
-                   exactly what `fly secrets import` reads.
+- .env.neon        ESP_DATABASE_URL (the least-privilege app role),
+                   ESP_SESSION_TOKEN_KEY and ESP_SCIM_TOKEN - exactly what
+                   the app gets, and exactly what `fly secrets import` reads.
 
 Secrets are generated here and written to those files; nothing secret is
 printed.
@@ -92,9 +93,16 @@ def with_credentials(url: str, user: str, password: str) -> str:
     return urlunsplit(parts._replace(netloc=netloc))
 
 
-def migrate(url: str) -> None:
+def migrate(url: str, app_role: str = APP_ROLE) -> bool:
+    """Apply the schema; if the app role already exists, re-apply its grants
+    so a new table is usable without re-passwording the role. Returns
+    whether grants were re-applied."""
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute(SCHEMA.read_text())
+        exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (app_role,)).fetchone()
+        if exists:
+            grant_app_role(conn, app_role)
+    return bool(exists)
 
 
 def grant_app_role(conn: psycopg.Connection, role: str) -> None:
@@ -102,11 +110,12 @@ def grant_app_role(conn: psycopg.Connection, role: str) -> None:
     ident = sql.Identifier(role)
     dbname = sql.Identifier(conn.info.dbname)
     for statement in (
-        sql.SQL("REVOKE ALL ON review_audit, review_sso_sessions FROM {}"),
+        sql.SQL("REVOKE ALL ON review_audit, review_sso_sessions, review_scim_users FROM {}"),
         sql.SQL("GRANT CONNECT ON DATABASE {db} TO {}"),
         sql.SQL("GRANT USAGE ON SCHEMA public TO {}"),
         sql.SQL("GRANT SELECT, INSERT ON review_audit TO {}"),
         sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON review_sso_sessions TO {}"),
+        sql.SQL("GRANT SELECT, INSERT, UPDATE, DELETE ON review_scim_users TO {}"),
     ):
         conn.execute(statement.format(ident, db=dbname))
 
@@ -170,11 +179,13 @@ def main() -> int:
     sub.add_parser("migrate", help="apply review_ui/schema.sql as the owner (idempotent)")
     sub.add_parser("create-app-role", help=f"(re)create {APP_ROLE}, write {APP_ENV}")
     sub.add_parser("verify", help="as the app role: chain intact, rewrites refused")
+    scim = sub.add_parser("scim-token", help=f"write ESP_SCIM_TOKEN to {APP_ENV} (RC1-575)")
+    scim.add_argument("--rotate", action="store_true", help="replace an existing token")
     args = parser.parse_args()
     try:
         if args.command == "migrate":
-            migrate(owner_url())
-            print("schema applied")
+            regranted = migrate(owner_url())
+            print("schema applied" + (f"; {APP_ROLE} grants re-applied" if regranted else ""))
         elif args.command == "create-app-role":
             url = create_app_role(owner_url())
             updates = {"ESP_DATABASE_URL": url}
@@ -182,6 +193,13 @@ def main() -> int:
                 updates["ESP_SESSION_TOKEN_KEY"] = Fernet.generate_key().decode()
             write_env_values(APP_ENV, updates)
             print(f"{APP_ROLE} ready; wrote {', '.join(updates)} to {APP_ENV} (mode 600)")
+        elif args.command == "scim-token":
+            if read_env_file(APP_ENV).get("ESP_SCIM_TOKEN") and not args.rotate:
+                print(f"ESP_SCIM_TOKEN already in {APP_ENV}; --rotate to replace it")
+                return 0
+            write_env_values(APP_ENV, {"ESP_SCIM_TOKEN": secrets.token_urlsafe(32)})
+            print(f"wrote ESP_SCIM_TOKEN to {APP_ENV} (mode 600); paste it into the IdP's "
+                  "provisioning connector and import it to Fly")
         elif args.command == "verify":
             problems = verify(app_url())
             for problem in problems:

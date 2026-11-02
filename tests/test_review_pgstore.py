@@ -25,6 +25,7 @@ from review_ui.api import create_app
 from review_ui.config import ReviewUiSettings
 from review_ui.db_setup import create_app_role, migrate, verify
 from review_ui.pgstore import PostgresAuditLog, StoreNotReady, open_pool
+from tests.test_review_scim import OKTA, TOKEN, deactivate_patch, okta_user
 from tests.test_review_sso import (
     AS_OF,
     AUDIENCE,
@@ -43,7 +44,7 @@ TEST_ROLE = "esp_app_test"
 
 def reset_schema() -> None:
     with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
-        conn.execute("DROP TABLE IF EXISTS review_audit, review_sso_sessions")
+        conn.execute("DROP TABLE IF EXISTS review_audit, review_sso_sessions, review_scim_users")
 
 
 @pytest.fixture()
@@ -118,6 +119,10 @@ def test_migrate_is_idempotent_and_the_app_role_holds_only_its_grants(db):
     assert grants == [
         ("review_audit", "INSERT"),
         ("review_audit", "SELECT"),
+        ("review_scim_users", "DELETE"),
+        ("review_scim_users", "INSERT"),
+        ("review_scim_users", "SELECT"),
+        ("review_scim_users", "UPDATE"),
         ("review_sso_sessions", "DELETE"),
         ("review_sso_sessions", "INSERT"),
         ("review_sso_sessions", "SELECT"),
@@ -248,3 +253,40 @@ def test_misconfiguration_fails_at_startup(tmp_path, db, apps):
     reset_schema()  # reachable, but never migrated
     with pytest.raises(StoreNotReady, match="db_setup migrate"):
         apps(tmp_path, FakeIdp(), db, KEY)
+
+
+def test_migrate_regrants_an_existing_app_role(db):
+    with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
+        conn.execute(f"REVOKE ALL ON review_scim_users FROM {TEST_ROLE}")
+    assert migrate(ADMIN_URL, app_role=TEST_ROLE) is True
+    grants = admin_rows(
+        "SELECT privilege_type FROM information_schema.role_table_grants"
+        " WHERE grantee = %s AND table_name = 'review_scim_users' ORDER BY 1",
+        (TEST_ROLE,),
+    )
+    assert [g[0] for g in grants] == ["DELETE", "INSERT", "SELECT", "UPDATE"]
+
+
+def test_scim_deactivation_ends_postgres_sessions_and_survives_a_restart(tmp_path, db, apps):
+    idp = FakeIdp()
+    first = apps(tmp_path, idp, db, KEY, scim_token=TOKEN, oidc_recheck_seconds=3600)
+    created = first.post("/scim/v2/Users", json=okta_user("dana", external_id="00u-dana"),
+                         headers=OKTA)
+    assert created.status_code == 201
+    dana_id = created.json()["id"]
+    sso_login(first)
+    sso_login(TestClient(first.app, follow_redirects=False), "sam")
+    assert admin_rows("SELECT count(*) FROM review_sso_sessions") == [(2,)]
+    # A deploy between provisioning and deactivation: Okta still holds the id.
+    restarted = apps(tmp_path, idp, db, KEY, scim_token=TOKEN, oidc_recheck_seconds=3600)
+    restarted.cookies.update(first.cookies)
+    resp = restarted.patch(f"/scim/v2/Users/{dana_id}", json=deactivate_patch(), headers=OKTA)
+    assert resp.status_code == 200 and resp.json()["active"] is False
+    assert admin_rows("SELECT email FROM review_sso_sessions") == [("sam@customer.example",)]
+    assert restarted.get("/api/me").json()["revoked_by"] == "Okta"
+    assert idp.refresh_calls == 0  # pushed, not polled
+    assert events()[-2:] == ["scim_deactivated", "access_revoked"]
+    dup = restarted.post("/scim/v2/Users", json=okta_user("DANA"), headers=OKTA)
+    assert dup.status_code == 409  # the unique index is case-insensitive
+    assert sso_login(restarted).headers["location"].startswith("/?sso_error=")
+    assert verify(db) == []

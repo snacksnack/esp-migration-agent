@@ -23,6 +23,7 @@ from psycopg_pool import ConnectionPool
 
 from review_ui.audit import GENESIS, build_entry, log_entry, verify_records
 from review_ui.oidc import Grant, SessionStore
+from review_ui.scim import ScimDirectory, ScimUser, UserNameTaken, matches
 from specs.model import ApproverIdentity
 
 # pg_advisory_xact_lock key serializing chain appends: two writers can never
@@ -55,7 +56,8 @@ def check_ready(pool: ConnectionPool) -> None:
     try:
         with pool.connection() as conn:
             conn.execute("SELECT 1 FROM review_audit LIMIT 0")
-            conn.execute("SELECT 1 FROM review_sso_sessions LIMIT 0")
+            conn.execute("SELECT subject, email FROM review_sso_sessions LIMIT 0")
+            conn.execute("SELECT 1 FROM review_scim_users LIMIT 0")
     except (errors.UndefinedTable, errors.InsufficientPrivilege) as exc:
         raise StoreNotReady(
             f"review-gate database is not ready ({exc.__class__.__name__}: {exc}); "
@@ -123,7 +125,7 @@ class PostgresSessionStore(SessionStore):
     def _load(self, sid: str) -> Grant | None:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT refresh_token_enc, checked_at FROM review_sso_sessions"
+                "SELECT refresh_token_enc, checked_at, subject, email FROM review_sso_sessions"
                 " WHERE sid = %s AND expires_at > now()",
                 (sid,),
             ).fetchone()
@@ -133,7 +135,7 @@ class PostgresSessionStore(SessionStore):
             token = self._fernet.decrypt(row[0].encode()).decode()
         except InvalidToken:
             return None
-        return Grant(token, row[1].timestamp())
+        return Grant(token, row[1].timestamp(), row[2], row[3])
 
     def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> None:
         encrypted = self._fernet.encrypt(grant.refresh_token.encode()).decode()
@@ -148,11 +150,17 @@ class PostgresSessionStore(SessionStore):
                 return
             conn.execute("DELETE FROM review_sso_sessions WHERE expires_at <= now()")
             conn.execute(
-                "INSERT INTO review_sso_sessions (sid, refresh_token_enc, checked_at, expires_at)"
-                " VALUES (%s, %s, %s, %s)"
+                "INSERT INTO review_sso_sessions"
+                " (sid, refresh_token_enc, checked_at, expires_at, subject, email)"
+                " VALUES (%s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (sid) DO UPDATE SET refresh_token_enc = EXCLUDED.refresh_token_enc,"
-                " checked_at = EXCLUDED.checked_at, expires_at = EXCLUDED.expires_at",
-                (sid, encrypted, checked_at, datetime.now(UTC) + timedelta(seconds=ttl_seconds)),
+                " checked_at = EXCLUDED.checked_at, expires_at = EXCLUDED.expires_at,"
+                " subject = EXCLUDED.subject, email = EXCLUDED.email",
+                (
+                    sid, encrypted, checked_at,
+                    datetime.now(UTC) + timedelta(seconds=ttl_seconds),
+                    grant.subject, grant.email,
+                ),
             )
 
     def _drop(self, sid: str) -> Grant | None:
@@ -160,3 +168,92 @@ class PostgresSessionStore(SessionStore):
         with self._pool.connection() as conn:
             conn.execute("DELETE FROM review_sso_sessions WHERE sid = %s", (sid,))
         return grant
+
+    def _drop_owned(self, subjects: set[str], emails: set[str]) -> int:
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "DELETE FROM review_sso_sessions"
+                " WHERE subject = ANY(%s) OR lower(email) = ANY(%s)",
+                (list(subjects), list(emails)),
+            )
+            return cur.rowcount
+
+
+SCIM_COLUMNS = "id, user_name, active, attributes, created_at, updated_at"
+
+
+def _scim_user(row: tuple) -> ScimUser:
+    return ScimUser(
+        id=row[0], user_name=row[1], active=row[2], attributes=row[3],
+        created=row[4], updated=row[5],
+    )
+
+
+class PostgresScimDirectory(ScimDirectory):
+    """The SCIM directory in review_scim_users (RC1-575): the IdP keeps the
+    ids this hands out, so they must outlive a deploy."""
+
+    def __init__(self, pool: ConnectionPool):
+        super().__init__()
+        self._pool = pool
+
+    def get(self, user_id: str) -> ScimUser | None:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                f"SELECT {SCIM_COLUMNS} FROM review_scim_users WHERE id = %s", (user_id,)
+            ).fetchone()
+        return _scim_user(row) if row else None
+
+    def by_user_name(self, user_name: str) -> ScimUser | None:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                f"SELECT {SCIM_COLUMNS} FROM review_scim_users"
+                " WHERE lower(user_name) = lower(%s)",
+                (user_name,),
+            ).fetchone()
+        return _scim_user(row) if row else None
+
+    def page(self, start: int, count: int) -> tuple[int, list[ScimUser]]:
+        with self._pool.connection() as conn:
+            total = conn.execute("SELECT count(*) FROM review_scim_users").fetchone()[0]
+            rows = conn.execute(
+                f"SELECT {SCIM_COLUMNS} FROM review_scim_users"
+                " ORDER BY created_at, id OFFSET %s LIMIT %s",
+                (start - 1, count),
+            ).fetchall()
+        return total, [_scim_user(r) for r in rows]
+
+    def insert(self, user: ScimUser) -> None:
+        try:
+            with self._pool.connection() as conn:
+                conn.execute(
+                    f"INSERT INTO review_scim_users ({SCIM_COLUMNS})"
+                    " VALUES (%s, %s, %s, %s, %s, %s)",
+                    (user.id, user.user_name, user.active, Jsonb(user.attributes),
+                     user.created, user.updated),
+                )
+        except errors.UniqueViolation as exc:
+            raise UserNameTaken(user.user_name) from exc
+
+    def update(self, user: ScimUser) -> None:
+        try:
+            with self._pool.connection() as conn:
+                conn.execute(
+                    "UPDATE review_scim_users SET user_name = %s, active = %s,"
+                    " attributes = %s, updated_at = %s WHERE id = %s",
+                    (user.user_name, user.active, Jsonb(user.attributes), user.updated,
+                     user.id),
+                )
+        except errors.UniqueViolation as exc:
+            raise UserNameTaken(user.user_name) from exc
+
+    def delete(self, user_id: str) -> None:
+        with self._pool.connection() as conn:
+            conn.execute("DELETE FROM review_scim_users WHERE id = %s", (user_id,))
+
+    def deprovisioned(self, identity: ApproverIdentity) -> ScimUser | None:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                f"SELECT {SCIM_COLUMNS} FROM review_scim_users WHERE NOT active"
+            ).fetchall()
+        return next((u for u in map(_scim_user, rows) if matches(u, identity)), None)
