@@ -20,7 +20,7 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 import httpx
@@ -163,6 +163,18 @@ class OidcProvider:
 class Grant:
     refresh_token: str
     checked_at: float  # wall-clock epoch seconds, comparable across restarts
+    # Who the session belongs to, so an IdP push (SCIM, RC1-575) can end
+    # every session of a deprovisioned user without waiting for a click.
+    subject: str | None = None
+    email: str | None = None
+
+
+def owned_by(grant: Grant, subjects: set[str], emails: set[str]) -> bool:
+    """Same matching rule for both stores: the IdP's user id, or any of the
+    user's email addresses, case-insensitively."""
+    if grant.subject and grant.subject in subjects:
+        return True
+    return bool(grant.email) and grant.email.lower() in emails
 
 
 class SessionStore:
@@ -191,8 +203,25 @@ class SessionStore:
         with self._lock:
             return self._grants.pop(sid, None)
 
-    def put(self, sid: str, refresh_token: str, ttl_seconds: int) -> None:
-        self._save(sid, Grant(refresh_token, time.time()), ttl_seconds)
+    def _drop_owned(self, subjects: set[str], emails: set[str]) -> int:
+        with self._lock:
+            doomed = [sid for sid, g in self._grants.items() if owned_by(g, subjects, emails)]
+            for sid in doomed:
+                del self._grants[sid]
+            return len(doomed)
+
+    def put(
+        self, sid: str, refresh_token: str, ttl_seconds: int, identity: ApproverIdentity
+    ) -> None:
+        grant = Grant(refresh_token, time.time(), identity.subject, identity.email)
+        self._save(sid, grant, ttl_seconds)
+
+    def end_sessions(self, subjects: set[str], emails: set[str]) -> int:
+        """End every session belonging to the user (RC1-575); returns how
+        many. Their next request finds no grant and is signed out."""
+        return self._drop_owned(
+            {s for s in subjects if s}, {e.lower() for e in emails if e}
+        )
 
     def pop(self, sid: str) -> str | None:
         grant = self._drop(sid)
@@ -210,5 +239,5 @@ class SessionStore:
         if rotated is None:
             self._drop(sid)
             return False
-        self._save(sid, Grant(rotated, time.time()), None)
+        self._save(sid, replace(grant, refresh_token=rotated, checked_at=time.time()), None)
         return True

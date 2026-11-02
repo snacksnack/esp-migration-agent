@@ -27,6 +27,11 @@ what it is: unverified.
 - GET  /api/auth/sso/start, /api/auth/sso/callback   the OIDC handshake
 - POST /api/login, /api/logout                        password in, anyone out
 - GET  /api/audit                                     the gate's decision log
+
+RC1-575 (ADR-0023) adds the push half: with ESP_SCIM_TOKEN set, the IdP's
+provisioning connector calls /scim/v2/Users (review_ui.scim), and a
+deactivation ends that user's sessions immediately rather than at their
+next click.
 """
 
 from __future__ import annotations
@@ -59,9 +64,17 @@ from review_ui.oidc import (
 )
 from review_ui.pgstore import (
     PostgresAuditLog,
+    PostgresScimDirectory,
     PostgresSessionStore,
     check_ready,
     open_pool,
+)
+from review_ui.scim import (
+    ScimDirectory,
+    ScimError,
+    UserNameTaken,
+    scim_error_response,
+    scim_router,
 )
 from specs.model import ApproverIdentity, MappingSpec, MappingStatus
 from telemetry import count
@@ -137,15 +150,21 @@ def create_app(
         check_ready(pool)
         sessions: SessionStore = PostgresSessionStore(pool, settings.session_token_key)
         audit: AuditLog | PostgresAuditLog = PostgresAuditLog(pool)
+        directory: ScimDirectory = PostgresScimDirectory(pool)
         # The spec resets to the baked-in file on every start (ADR-0011);
         # the log no longer does, so it says so rather than leaving a spec
         # approved yesterday unexplained today.
         spec_status = _load(spec_path).status
         audit.record("service_start", None, spec=spec_path.name, spec_status=str(spec_status))
     else:
+        if settings.scim_enabled and settings.environment == "production":
+            # The IdP keeps the SCIM ids we hand out; an in-memory directory
+            # forgets them on the next deploy and every update then 404s.
+            raise ValueError("ESP_SCIM_TOKEN needs ESP_DATABASE_URL in production")
         pool = None
         sessions = SessionStore()
         audit = AuditLog(settings.audit_log)
+        directory = ScimDirectory()
     app = FastAPI(title="ESP migration review gate", docs_url=None, redoc_url=None)
     app.state.pool = pool  # closed by the owner of the process (tests close it)
     app.add_middleware(
@@ -255,8 +274,16 @@ def create_app(
         except SsoError as exc:
             audit.record("sign_in_refused", None, provider=provider.name, reason=str(exc))
             return RedirectResponse(f"/?sso_error={quote(str(exc))}", status_code=303)
+        if settings.scim_enabled and directory.deprovisioned(signin.identity) is not None:
+            # Belt and braces: the IdP should not have let them in at all.
+            reason = f"{provider.name} has deprovisioned this user (SCIM)"
+            audit.record("sign_in_refused", signin.identity, provider=provider.name,
+                         reason=reason)
+            provider.revoke(signin.refresh_token)
+            return RedirectResponse(f"/?sso_error={quote(reason)}", status_code=303)
         sid = auth.sign_in(request, signin.identity, settings.oidc_session_hours * 3600)
-        sessions.put(sid, signin.refresh_token, settings.oidc_session_hours * 3600)
+        sessions.put(sid, signin.refresh_token, settings.oidc_session_hours * 3600,
+                     signin.identity)
         audit.record("sign_in", signin.identity, provider=provider.name)
         return RedirectResponse("/", status_code=303)
 
@@ -269,6 +296,9 @@ def create_app(
             "password_enabled": bool(settings.review_password),
             "sso_provider": provider.name if provider is not None else None,
             "identity": identity.model_dump(mode="json") if identity else None,
+            # Set on the one response that discovers the IdP took the session
+            # back, so the UI can say why the user is suddenly signed out.
+            "revoked_by": getattr(request.state, "revoked_by", None),
         }
 
     @app.get("/api/audit")
@@ -385,6 +415,15 @@ def create_app(
         # questions join the severity-ranked register the reviewer sees.
         report.risks = sort_risks([*report.risks, *spec_risks(_load(spec_path))])
         return report
+
+    if settings.scim_enabled:
+        app.include_router(
+            scim_router(settings, directory, sessions, audit,
+                        provider.name if provider is not None else settings.oidc_provider_name),
+            prefix="/scim/v2",
+        )
+        app.add_exception_handler(ScimError, scim_error_response)
+        app.add_exception_handler(UserNameTaken, scim_error_response)
 
     if FRONTEND_DIST.is_dir():  # single-process demo mode; dev uses the Vite proxy
         app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

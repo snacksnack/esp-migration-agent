@@ -14,11 +14,16 @@ const EVENT_LABELS: Record<string, string> = {
   approval_refused: 'approval refused by the gate',
   spec_approved: 'approved the spec',
   service_start: 'restarted the service; the spec reset to its committed draft',
+  scim_provisioned: 'provisioned a user',
+  scim_deactivated: 'deactivated a user',
+  scim_reactivated: 'reactivated a user',
+  scim_deleted: 'deleted a user',
 }
 
 function actorName(record: AuditRecord): string {
   const { actor } = record
   if (record.event === 'service_start') return 'system'
+  if (record.event.startsWith('scim_')) return String(record.detail.provider ?? 'IdP (SCIM)')
   if (actor.method === 'anonymous') return 'anonymous'
   if (actor.method === 'password') return 'demo approver (unverified)'
   return actor.email ?? actor.name ?? 'unknown'
@@ -30,6 +35,11 @@ function summary(record: AuditRecord): string {
     return `${d.kind} ${String(d.source)} → ${String(d.status)}`
   if (record.event === 'spec_approved') return `sha256 ${String(d.content_sha256).slice(0, 12)}…`
   if (record.event === 'service_start') return `spec status: ${String(d.spec_status)}`
+  if (record.event === 'scim_deactivated') {
+    const n = Number(d.sessions_ended)
+    return `${String(d.user_name)}: ${n} session${n === 1 ? '' : 's'} ended`
+  }
+  if (record.event.startsWith('scim_')) return String(d.user_name)
   if (typeof d.reason === 'string') return d.reason
   return ''
 }
