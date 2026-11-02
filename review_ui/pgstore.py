@@ -56,7 +56,10 @@ def check_ready(pool: ConnectionPool) -> None:
     try:
         with pool.connection() as conn:
             conn.execute("SELECT 1 FROM review_audit LIMIT 0")
-            conn.execute("SELECT subject, email FROM review_sso_sessions LIMIT 0")
+            conn.execute(
+                "SELECT subject, email, revoked_at, revocation_audited"
+                " FROM review_sso_sessions LIMIT 0"
+            )
             conn.execute("SELECT 1 FROM review_scim_users LIMIT 0")
     except (errors.UndefinedTable, errors.InsufficientPrivilege) as exc:
         raise StoreNotReady(
@@ -125,12 +128,15 @@ class PostgresSessionStore(SessionStore):
     def _load(self, sid: str) -> Grant | None:
         with self._pool.connection() as conn:
             row = conn.execute(
-                "SELECT refresh_token_enc, checked_at, subject, email FROM review_sso_sessions"
+                "SELECT refresh_token_enc, checked_at, subject, email,"
+                " revoked_at IS NOT NULL, revocation_audited FROM review_sso_sessions"
                 " WHERE sid = %s AND expires_at > now()",
                 (sid,),
             ).fetchone()
         if row is None:
             return None
+        if row[4]:  # revoked: the token is never used again, so never decrypted
+            return Grant("", row[1].timestamp(), row[2], row[3], revoked=True, audited=row[5])
         try:
             token = self._fernet.decrypt(row[0].encode()).decode()
         except InvalidToken:
@@ -144,7 +150,7 @@ class PostgresSessionStore(SessionStore):
             if ttl_seconds is None:  # rotation: keep the session's expiry
                 conn.execute(
                     "UPDATE review_sso_sessions SET refresh_token_enc = %s, checked_at = %s"
-                    " WHERE sid = %s",
+                    " WHERE sid = %s AND revoked_at IS NULL",
                     (encrypted, checked_at, sid),
                 )
                 return
@@ -155,7 +161,8 @@ class PostgresSessionStore(SessionStore):
                 " VALUES (%s, %s, %s, %s, %s, %s)"
                 " ON CONFLICT (sid) DO UPDATE SET refresh_token_enc = EXCLUDED.refresh_token_enc,"
                 " checked_at = EXCLUDED.checked_at, expires_at = EXCLUDED.expires_at,"
-                " subject = EXCLUDED.subject, email = EXCLUDED.email",
+                " subject = EXCLUDED.subject, email = EXCLUDED.email,"
+                " revoked_at = NULL, revocation_audited = false",
                 (
                     sid, encrypted, checked_at,
                     datetime.now(UTC) + timedelta(seconds=ttl_seconds),
@@ -169,14 +176,34 @@ class PostgresSessionStore(SessionStore):
             conn.execute("DELETE FROM review_sso_sessions WHERE sid = %s", (sid,))
         return grant
 
-    def _drop_owned(self, subjects: set[str], emails: set[str]) -> int:
+    def _revoke(self, sid: str) -> None:
+        with self._pool.connection() as conn:
+            conn.execute(
+                "UPDATE review_sso_sessions SET revoked_at = now()"
+                " WHERE sid = %s AND revoked_at IS NULL",
+                (sid,),
+            )
+
+    def _revoke_owned(self, subjects: set[str], emails: set[str]) -> int:
         with self._pool.connection() as conn:
             cur = conn.execute(
-                "DELETE FROM review_sso_sessions"
-                " WHERE subject = ANY(%s) OR lower(email) = ANY(%s)",
+                "UPDATE review_sso_sessions SET revoked_at = now()"
+                " WHERE revoked_at IS NULL AND expires_at > now()"
+                " AND (subject = ANY(%s) OR lower(email) = ANY(%s))",
                 (list(subjects), list(emails)),
             )
             return cur.rowcount
+
+    def _claim(self, sid: str) -> bool:
+        # The row lock makes this the arbiter: of concurrent claimants,
+        # exactly one sees rowcount 1.
+        with self._pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE review_sso_sessions SET revocation_audited = true"
+                " WHERE sid = %s AND revoked_at IS NOT NULL AND NOT revocation_audited",
+                (sid,),
+            )
+            return cur.rowcount == 1
 
 
 SCIM_COLUMNS = "id, user_name, active, attributes, created_at, updated_at"
