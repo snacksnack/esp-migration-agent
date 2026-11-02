@@ -3,6 +3,47 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0024: A revocation beats a refresh, and its record commits with its claim (2026-11-02)
+
+**Context.** An external review of RC1-575 found two ways the revocation path
+could still go wrong, both of them races between a SCIM push and a request
+already in flight. Neither was reachable from the UI by hand; both are
+reachable under a provisioning push, which is exactly when revocation has to
+hold.
+
+**A rotation that loses to a revocation is not a live session.** RC1-582:
+`SessionStore.check()` asked the IdP to re-confirm the session, then stored
+the rotated refresh token. Both stores already refused that write when the
+session had been revoked meanwhile (the in-memory store checks
+`current.revoked`; Postgres guards with `WHERE revoked_at IS NULL`) - but
+`_save()` returned nothing, so `check()` could not tell a refused write from
+a successful one and answered `live` either way. A deactivation landing during
+the token-endpoint call therefore authorized exactly one more write before
+the next request failed closed. `_save()` now reports whether it stored the
+rotation and `check()` answers `revoked` when it did not. The store, which
+holds the lock and the `WHERE` clause, is the one that decides; the caller
+stops guessing.
+
+**The claim and the record commit together.** RC1-583: a revoked session is
+audited once, and `claim_revocation()` picked the one caller that should write
+the record. It committed `revocation_audited = true` in its own transaction,
+before `audit.record()` wrote in another. That ordering is at-most-once: if
+the insert failed, the claim was already spent and no later request would ever
+record the revocation. For an append-only log whose purpose is to show that
+access was taken back, a lost record is the worse failure - a duplicate is
+merely untidy, and the chain makes it obvious. `PostgresSessionStore` now
+claims and inserts in one transaction (`PostgresAuditLog.record_within()`
+appends inside a caller's transaction), so the two roll back together. The
+in-memory store cannot share a transaction with the JSONL file, so it
+releases the claim when the record raises: the next request records it
+instead. That leaves a crash between claim and record losing the event on the
+file-backed path only, which is dev and CI, where the process restart has
+already forgotten the sessions.
+
+**Not fixed here.** Nothing was done about a record that is written while the
+request's own response fails after it; the audit log deliberately records the
+gate's decision, not the delivery of its reply.
+
 ## ADR-0023: The IdP pushes deprovisioning over SCIM; revocation stops waiting for a click (2026-11-01)
 
 **Decision.** RC1-575: with `ESP_SCIM_TOKEN` set, the review gate serves a

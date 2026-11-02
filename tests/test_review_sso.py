@@ -426,3 +426,43 @@ def test_revocation_during_a_refresh_does_not_authorize_the_request():
     # and it stays revoked, without another round trip
     assert store.check("sid-dana", provider, 0) == "revoked"
     assert provider.calls == 1
+
+
+def test_a_failed_revocation_record_is_retried_not_lost():
+    """RC1-583: claiming the revocation and recording it must not come apart.
+    If the record fails, the claim is released so the next request writes it;
+    otherwise the event is lost for good."""
+    store = SessionStore()
+    identity = ApproverIdentity(
+        method="oidc",
+        verified=True,
+        issuer=ISSUER,
+        subject="00u-dana",
+        email="dana@customer.example",
+        name="Dana Ops",
+    )
+    store.put("sid-dana", "rt-dana-1", 3600, identity)
+    store.end_sessions({"00u-dana"}, set())
+
+    class FlakyAudit:
+        def __init__(self):
+            self.fail_next = True
+            self.recorded: list[str] = []
+
+        def record(self, event: str, actor, **detail) -> dict:
+            if self.fail_next:
+                self.fail_next = False
+                raise RuntimeError("audit insert failed")
+            self.recorded.append(event)
+            return {"event": event}
+
+    audit = FlakyAudit()
+    with pytest.raises(RuntimeError):
+        store.claim_and_record("sid-dana", audit, "access_revoked", identity)
+    assert audit.recorded == []
+    # The claim was released, so the next request still records it.
+    assert store.claim_and_record("sid-dana", audit, "access_revoked", identity) is True
+    assert audit.recorded == ["access_revoked"]
+    # And only once.
+    assert store.claim_and_record("sid-dana", audit, "access_revoked", identity) is False
+    assert audit.recorded == ["access_revoked"]

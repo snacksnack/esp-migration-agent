@@ -25,7 +25,13 @@ from review_ui import auth
 from review_ui.api import create_app
 from review_ui.config import ReviewUiSettings
 from review_ui.db_setup import create_app_role, migrate, verify
-from review_ui.pgstore import PostgresAuditLog, StoreNotReady, open_pool
+from review_ui.pgstore import (
+    PostgresAuditLog,
+    PostgresSessionStore,
+    StoreNotReady,
+    open_pool,
+)
+from specs.model import ApproverIdentity
 from tests.test_review_scim import OKTA, TOKEN, deactivate_patch, okta_user
 from tests.test_review_sso import (
     AS_OF,
@@ -325,3 +331,48 @@ def test_revocation_during_a_refresh_does_not_authorize_the_write(tmp_path, db, 
     assert resp.status_code == 401
     assert load_spec(tmp_path / DRAFT.name).consent_mappings[0].status.value == "proposed"
     assert client.get("/api/me").json()["authenticated"] is False
+
+
+def test_a_failed_revocation_record_rolls_the_claim_back(db):
+    """RC1-583, on the real transaction: the claim and the audit insert commit
+    together, so an insert that raises leaves the session unclaimed and the
+    event still recordable by the next request."""
+    pool = open_pool(db)
+    try:
+        sessions = PostgresSessionStore(pool, KEY)
+        audit = PostgresAuditLog(pool)
+        identity = ApproverIdentity(
+            method="oidc",
+            verified=True,
+            issuer="https://customer.okta.example",
+            subject="00u-dana",
+            email="dana@customer.example",
+            name="Dana Ops",
+        )
+        sessions.put("sid-dana", "rt-dana-1", 3600, identity)
+        assert sessions.end_sessions({"00u-dana"}, set()) == 1
+
+        class FailingInsert(PostgresAuditLog):
+            """Inserts, then raises - still inside the caller's transaction."""
+
+            def record_within(self, conn, event, actor, **detail):
+                super().record_within(conn, event, actor, **detail)
+                raise RuntimeError("audit insert failed")
+
+        before = events()
+        with pytest.raises(RuntimeError):
+            sessions.claim_and_record(
+                "sid-dana", FailingInsert(pool), "access_revoked", identity
+            )
+        assert events() == before  # rolled back with the claim
+        assert admin_rows(
+            "SELECT revocation_audited FROM review_sso_sessions WHERE sid = %s",
+            ("sid-dana",),
+        ) == [(False,)]
+        # A later request records it, exactly once.
+        assert sessions.claim_and_record("sid-dana", audit, "access_revoked", identity)
+        assert events() == [*before, "access_revoked"]
+        assert not sessions.claim_and_record("sid-dana", audit, "access_revoked", identity)
+        assert events() == [*before, "access_revoked"]
+    finally:
+        pool.close()

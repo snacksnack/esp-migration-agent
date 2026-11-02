@@ -177,6 +177,13 @@ class Grant:
 SessionState = Literal["live", "revoked", "missing"]
 
 
+class AuditSink(Protocol):
+    """What a session store needs of an audit log: review_ui.audit.AuditLog
+    and review_ui.pgstore.PostgresAuditLog both satisfy it."""
+
+    def record(self, event: str, actor: ApproverIdentity | None, **detail) -> dict: ...
+
+
 def owned_by(grant: Grant, subjects: set[str], emails: set[str]) -> bool:
     """Same matching rule for both stores: the IdP's user id, or any of the
     user's email addresses, case-insensitively."""
@@ -242,6 +249,12 @@ class SessionStore:
             self._grants[sid] = replace(grant, audited=True)
             return True
 
+    def _release_claim(self, sid: str) -> None:
+        with self._lock:
+            grant = self._grants.get(sid)
+            if grant is not None and grant.audited:
+                self._grants[sid] = replace(grant, audited=False)
+
     def put(
         self, sid: str, refresh_token: str, ttl_seconds: int, identity: ApproverIdentity
     ) -> None:
@@ -291,3 +304,28 @@ class SessionStore:
         """True for exactly one caller per revoked session: the one that
         should write the access_revoked record."""
         return self._claim(sid)
+
+    def claim_and_record(
+        self,
+        sid: str,
+        audit: AuditSink,
+        event: str,
+        actor: ApproverIdentity | None,
+        **detail,
+    ) -> bool:
+        """Record a revoked session's event once, without losing it (RC1-583).
+
+        Claiming and recording must not come apart. Claiming first and
+        recording second is at-most-once: if the record fails, the claim is
+        already spent and no later request will write the event at all. Here
+        the claim is released when the record raises, so the next request
+        records it instead; PostgresSessionStore commits the two together and
+        closes the crash window too."""
+        if not self._claim(sid):
+            return False
+        try:
+            audit.record(event, actor, **detail)
+        except Exception:
+            self._release_claim(sid)
+            raise
+        return True
