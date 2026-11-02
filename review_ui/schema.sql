@@ -47,3 +47,26 @@ CREATE TABLE IF NOT EXISTS review_sso_sessions (
     expires_at         timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS review_sso_sessions_expires ON review_sso_sessions (expires_at);
+
+-- RC1-575 (ADR-0023): whose session is it, so an IdP push can end every
+-- session of a deprovisioned user at once. Nullable: sessions signed in
+-- before this migration simply age out (8h).
+ALTER TABLE review_sso_sessions ADD COLUMN IF NOT EXISTS subject text;
+ALTER TABLE review_sso_sessions ADD COLUMN IF NOT EXISTS email text;
+CREATE INDEX IF NOT EXISTS review_sso_sessions_subject ON review_sso_sessions (subject);
+CREATE INDEX IF NOT EXISTS review_sso_sessions_email ON review_sso_sessions (lower(email));
+
+-- Users the IdP has provisioned over SCIM (RC1-575). The IdP is the source
+-- of truth; this is its push target, holding what it sent so the connector's
+-- reads and updates round-trip. Mutable by design; the decisions it drives
+-- (deactivations) land in review_audit.
+CREATE TABLE IF NOT EXISTS review_scim_users (
+    id           text PRIMARY KEY,
+    user_name    text NOT NULL,
+    active       boolean NOT NULL,
+    attributes   jsonb NOT NULL,
+    created_at   timestamptz NOT NULL,
+    updated_at   timestamptz NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS review_scim_users_user_name
+    ON review_scim_users (lower(user_name));

@@ -61,7 +61,12 @@ proposes, deterministic Python validates, a human approves.
   (`review_ui/pgstore.py`, schema `review_ui/schema.sql`, setup CLI
   `python -m review_ui.db_setup`); app role esp_app is INSERT/SELECT-only on
   review_audit and triggers refuse UPDATE/DELETE/TRUNCATE. Neon creds live in
-  .env.neon / .env.neon.owner, NEVER .env. pgstore tests need
+  .env.neon / .env.neon.owner, NEVER .env. RC1-575 (ADR-0023):
+  ESP_SCIM_TOKEN serves SCIM 2.0 /scim/v2/Users (`review_ui/scim.py`) for
+  Okta's provisioning connector; a pushed deactivation (PATCH or PUT
+  active=false) deletes that user's sessions at once and the UI's visible-tab
+  /api/me poll signs them out; directory in review_scim_users; production
+  requires the database. pgstore tests need
   ESP_TEST_DATABASE_URL (CI has a postgres:18 service). ESP_REVIEW_PASSWORD
   and ESP_OIDC_* unset = everything open, so dev/CI/tests are untouched.
   No volume; restart = pristine fixture. Deploys via fly-deploy.yml on CI green (not the e2e).

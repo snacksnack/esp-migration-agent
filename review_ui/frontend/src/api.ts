@@ -204,6 +204,8 @@ export interface Me {
   password_enabled?: boolean
   sso_provider?: string | null
   identity?: ApproverIdentity | null
+  // Set on the one response that found the IdP had ended the session (RC1-575).
+  revoked_by?: string | null
 }
 
 // Full-page navigation, not fetch: the IdP's login page is the customer's.
