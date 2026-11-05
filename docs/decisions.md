@@ -33,13 +33,30 @@ and already holds what earlier steps wrote. Appending to a file we did not
 create leaves its mode alone - tightening permissions on a caller's file is a
 surprise, not a hardening.
 
-**Why rework and not dismiss.** A dismissal was available and defensible, and
-it would have been the wrong habit: a credential-provisioning tool cannot
-avoid *emitting* a credential, but it can choose a channel that is not a log,
-and the file is also a better channel on its merits (no terminal scrollback,
-no shell history, reusable across shells, and `0600` instead of
-world-readable). The estate rule is that scanners are never silenced; the
-corollary is that a finding gets answered in code wherever code can answer it.
+**The rework does not clear the alert, and a dismissal was still needed.**
+Writing the token to a file traded `py/clear-text-logging-sensitive-data` for
+`py/clear-text-storage-sensitive-data` at the `write_env` call: same rule
+family, same high severity, one line further down. What the rule objects to is
+a credential in clear text, and minting a plaintext credential is this
+module's entire purpose, so no change of channel can satisfy it. Encrypting
+the file would put the key beside the ciphertext, since the consumer needs
+plaintext either way. Renaming the local so the heuristic stops matching would
+clear the alert without changing a byte of behavior, which is exactly what the
+never-silence rule exists to prevent: a dismissal is a visible record, a
+rename is not. So alert #2 is dismissed with its reason, and alert #1 closes
+when this lands.
+
+**Why keep the rework anyway.** Not for the alert count, which is unchanged.
+CI no longer pipes a secret through a step's stdout: the old step was
+`python -m executor.bootstrap >> "$GITHUB_ENV"` on a public repo, where the
+gap between safe and leaked was a single redirect operator, and the e2e log
+now reads `wrote the API token to ... (not shown here)` where it used to carry
+the token itself. The file is also the better channel on its merits - no
+terminal scrollback, no shell history, reusable across shells, `0600` instead
+of world-readable. The estate rule that scanners are never silenced gets a
+sharper corollary from this: a finding gets answered in code wherever code can
+answer it, and where it cannot, the dismissal carries the reason rather than
+the silence.
 
 **The gitignore got the same treatment.** `.env.neon` and `.env.neon.owner`
 had each been added by hand, and `.env.listmonk` would have been a third - so
