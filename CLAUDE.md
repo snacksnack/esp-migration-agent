@@ -72,7 +72,9 @@ proposes, deterministic Python validates, a human approves.
   No volume; restart = pristine fixture. Deploys via fly-deploy.yml on CI green (not the e2e).
 - `executor/` - Phases 3-4 (ADR-0006/0007): plan builder, target adapters
   (Listmonk dev, Brevo live demo) behind one protocol picked by --target,
-  diff/execute engine, reconciliation, cutover plan, dev-target bootstrap.
+  diff/execute engine, reconciliation, cutover plan, dev-target bootstrap
+  (`bootstrap.py` writes ESP_LISTMONK_* to a file, `--out`, never to
+  stdout - ADR-0025; CI uses `--out "$GITHUB_ENV" --append`).
   The suppression invariant is checked at plan build, per write, and at
   reconciliation (100%, enumerated). Dry-run is the default
   (`python -m executor.run --spec ...`); writes need --execute. The spec is

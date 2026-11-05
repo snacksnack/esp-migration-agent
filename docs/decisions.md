@@ -3,6 +3,69 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0025: A credential-provisioning tool emits to a file, not to stdout (2026-11-04)
+
+**Context.** CodeQL's default setup, enabled across the estate in RC1-613,
+raised one high alert on the whole estate:
+`py/clear-text-logging-sensitive-data` at `executor/bootstrap.py:88`, where
+the freshly created Listmonk API token was printed as `ESP_LISTMONK_PASSWORD=`.
+
+**It was a true positive about the pattern and a near miss about the risk.**
+Both documented call sites captured stdout rather than logging it - CI
+redirected into `$GITHUB_ENV`, the demo used `eval "$(... --export)"` - so no
+token has ever reached a build log, and the credential is a throwaway for a
+localhost dev container created with compose-default admin credentials. There
+was nothing real to protect and nothing currently leaking.
+
+That is not a reason to dismiss it. "The caller redirects our stdout" is not
+a property this module can guarantee about its callers, and the gap between
+safe and leaked is one `tee`, one debugging change, or one dropped `>>` in a
+workflow file on a public repo. The alert describes a real shape even where
+it does not describe a live exposure.
+
+**Decision: stop printing it.** `bootstrap` now writes the three
+`ESP_LISTMONK_*` lines to a file the caller names (`--out`, default
+`.env.listmonk`), at mode `0600` when this process creates it, and prints
+only the URL, the username, and where it put the token. `--export` is gone.
+CI uses `--out "$GITHUB_ENV" --append` and so never pipes a secret through
+stdout at all; `--append` exists because `$GITHUB_ENV` belongs to the runner
+and already holds what earlier steps wrote. Appending to a file we did not
+create leaves its mode alone - tightening permissions on a caller's file is a
+surprise, not a hardening.
+
+**The rework does not clear the alert, and a dismissal was still needed.**
+Writing the token to a file traded `py/clear-text-logging-sensitive-data` for
+`py/clear-text-storage-sensitive-data` at the `write_env` call: same rule
+family, same high severity, one line further down. What the rule objects to is
+a credential in clear text, and minting a plaintext credential is this
+module's entire purpose, so no change of channel can satisfy it. Encrypting
+the file would put the key beside the ciphertext, since the consumer needs
+plaintext either way. Renaming the local so the heuristic stops matching would
+clear the alert without changing a byte of behavior, which is exactly what the
+never-silence rule exists to prevent: a dismissal is a visible record, a
+rename is not. So alert #2 is dismissed with its reason, and alert #1 closes
+when this lands.
+
+**Why keep the rework anyway.** Not for the alert count, which is unchanged.
+CI no longer pipes a secret through a step's stdout: the old step was
+`python -m executor.bootstrap >> "$GITHUB_ENV"` on a public repo, where the
+gap between safe and leaked was a single redirect operator, and the e2e log
+now reads `wrote the API token to ... (not shown here)` where it used to carry
+the token itself. The file is also the better channel on its merits - no
+terminal scrollback, no shell history, reusable across shells, `0600` instead
+of world-readable. The estate rule that scanners are never silenced gets a
+sharper corollary from this: a finding gets answered in code wherever code can
+answer it, and where it cannot, the dismissal carries the reason rather than
+the silence.
+
+**The gitignore got the same treatment.** `.env.neon` and `.env.neon.owner`
+had each been added by hand, and `.env.listmonk` would have been a third - so
+the rule is now `.env.*` with an `!.env.example` negation. This repo has
+already leaked credentials once through a file the `.env` rules did not match
+(RC1-581, a committed vim swap file), which is the reason to prefer a pattern
+that catches the next variant nobody thought of. A test asserts the default
+output path stays covered by it.
+
 ## ADR-0024: A revocation beats a refresh, and its record commits with its claim (2026-11-02)
 
 **Context.** An external review of RC1-575 found two ways the revocation path

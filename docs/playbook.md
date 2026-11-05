@@ -21,8 +21,8 @@ Before the engagement starts, confirm:
   offset and are rendered account-local (ADR-0004).
 - **Target access**: a target account and API key with list/contact/campaign
   write scope. Dev rehearsals use Listmonk (`docker compose up -d`, then
-  `eval "$(uv run python -m executor.bootstrap --export)"`); live targets
-  plug in behind the same protocol via `--target`.
+  `uv run python -m executor.bootstrap` and `set -a; . ./.env.listmonk; set
+  +a`); live targets plug in behind the same protocol via `--target`.
 - **Workstation**: `uv sync`, then `uv run ruff check . && uv run pytest`
   green. Credentials go in `.env` (`ESP_` prefix, see `.env.example`); every
   credential is optional and nothing reads `.env` from tests.

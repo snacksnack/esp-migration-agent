@@ -10,7 +10,8 @@ invariant enforced in code throughout. Nothing is ever sent on any target.
 
 ```bash
 docker compose up -d
-eval "$(uv run python -m executor.bootstrap --export)"
+uv run python -m executor.bootstrap     # writes .env.listmonk, mode 0600
+set -a; . ./.env.listmonk; set +a
 ```
 
 **Brevo (third-party target):** create a free account (brevo.com), add
@@ -30,7 +31,7 @@ full arc fits a short recording; `DEMO_FAST=0` is the real thing (the full
 fixture takes ~15 minutes of write time per fresh target).
 
 To reset the Listmonk target between takes: `docker compose down -v && docker
-compose up -d`, then re-run the bootstrap eval line.
+compose up -d`, then re-run the two bootstrap lines above.
 
 A rendered clip of the full arc lives at [docs/demo.gif](demo.gif)
 (asciinema cast -> agg, idle time capped at 2s).

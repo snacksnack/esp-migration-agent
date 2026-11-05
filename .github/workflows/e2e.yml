@@ -66,8 +66,12 @@ jobs:
       - name: Start Listmonk
         run: docker compose up -d --wait
 
+      # --out/--append rather than a stdout redirect: the token is written
+      # straight into the step environment and never crosses stdout, so a
+      # dropped redirect here cannot put a credential in a public build log
+      # (RC1-617).
       - name: Bootstrap API user
-        run: uv run python -m executor.bootstrap >> "$GITHUB_ENV"
+        run: uv run python -m executor.bootstrap --out "$GITHUB_ENV" --append
 
       - name: Integration tests
         run: uv run pytest -m integration -v
