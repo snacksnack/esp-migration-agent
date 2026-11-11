@@ -21,6 +21,7 @@ from psycopg import Connection, errors
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from errorevents import db_event, emit, emits_db_events
 from review_ui.audit import GENESIS, build_entry, log_entry, verify_records
 from review_ui.oidc import AuditSink, Grant, SessionStore
 from review_ui.scim import ScimDirectory, ScimUser, UserNameTaken, matches
@@ -62,6 +63,7 @@ def check_ready(pool: ConnectionPool) -> None:
             )
             conn.execute("SELECT 1 FROM review_scim_users LIMIT 0")
     except (errors.UndefinedTable, errors.InsufficientPrivilege) as exc:
+        emit(db_event("db.ready_check", exc))
         raise StoreNotReady(
             f"review-gate database is not ready ({exc.__class__.__name__}: {exc}); "
             "run `python -m review_ui.db_setup migrate` and `create-app-role`"
@@ -85,6 +87,7 @@ class PostgresAuditLog:
         log_entry(entry)
         return entry
 
+    @emits_db_events("audit.append")
     def record_within(
         self, conn: Connection, event: str, actor: ApproverIdentity | None, **detail
     ) -> dict:
@@ -108,6 +111,7 @@ class PostgresAuditLog:
         )
         return entry
 
+    @emits_db_events("audit.read")
     def read(self, limit: int = 100) -> list[dict]:
         """Newest first."""
         with self._pool.connection() as conn:
@@ -117,6 +121,7 @@ class PostgresAuditLog:
             ).fetchall()
         return [row_to_record(r) for r in rows]
 
+    @emits_db_events("audit.verify")
     def verify(self) -> list[str]:
         with self._pool.connection() as conn:
             rows = conn.execute(
@@ -135,6 +140,7 @@ class PostgresSessionStore(SessionStore):
         self._pool = pool
         self._fernet = Fernet(token_key.encode())
 
+    @emits_db_events("sessions.load")
     def _load(self, sid: str) -> Grant | None:
         with self._pool.connection() as conn:
             row = conn.execute(
@@ -153,6 +159,7 @@ class PostgresSessionStore(SessionStore):
             return None
         return Grant(token, row[1].timestamp(), row[2], row[3])
 
+    @emits_db_events("sessions.save")
     def _save(self, sid: str, grant: Grant, ttl_seconds: int | None) -> bool:
         encrypted = self._fernet.encrypt(grant.refresh_token.encode()).decode()
         checked_at = datetime.fromtimestamp(grant.checked_at, UTC)
@@ -183,12 +190,14 @@ class PostgresSessionStore(SessionStore):
             )
         return True
 
+    @emits_db_events("sessions.drop")
     def _drop(self, sid: str) -> Grant | None:
         grant = self._load(sid)
         with self._pool.connection() as conn:
             conn.execute("DELETE FROM review_sso_sessions WHERE sid = %s", (sid,))
         return grant
 
+    @emits_db_events("sessions.revoke")
     def _revoke(self, sid: str) -> None:
         with self._pool.connection() as conn:
             conn.execute(
@@ -197,6 +206,7 @@ class PostgresSessionStore(SessionStore):
                 (sid,),
             )
 
+    @emits_db_events("sessions.revoke")
     def _revoke_owned(self, subjects: set[str], emails: set[str]) -> int:
         with self._pool.connection() as conn:
             cur = conn.execute(
@@ -207,6 +217,7 @@ class PostgresSessionStore(SessionStore):
             )
             return cur.rowcount
 
+    @emits_db_events("sessions.claim")
     def claim_and_record(
         self,
         sid: str,
@@ -232,6 +243,7 @@ class PostgresSessionStore(SessionStore):
         log_entry(entry)
         return True
 
+    @emits_db_events("sessions.claim")
     def _claim(self, sid: str) -> bool:
         # The row lock makes this the arbiter: of concurrent claimants,
         # exactly one sees rowcount 1.
@@ -262,6 +274,7 @@ class PostgresScimDirectory(ScimDirectory):
         super().__init__()
         self._pool = pool
 
+    @emits_db_events("scim.read")
     def get(self, user_id: str) -> ScimUser | None:
         with self._pool.connection() as conn:
             row = conn.execute(
@@ -269,6 +282,7 @@ class PostgresScimDirectory(ScimDirectory):
             ).fetchone()
         return _scim_user(row) if row else None
 
+    @emits_db_events("scim.read")
     def by_user_name(self, user_name: str) -> ScimUser | None:
         with self._pool.connection() as conn:
             row = conn.execute(
@@ -278,6 +292,7 @@ class PostgresScimDirectory(ScimDirectory):
             ).fetchone()
         return _scim_user(row) if row else None
 
+    @emits_db_events("scim.read")
     def page(self, start: int, count: int) -> tuple[int, list[ScimUser]]:
         with self._pool.connection() as conn:
             total = conn.execute("SELECT count(*) FROM review_scim_users").fetchone()[0]
@@ -288,6 +303,7 @@ class PostgresScimDirectory(ScimDirectory):
             ).fetchall()
         return total, [_scim_user(r) for r in rows]
 
+    @emits_db_events("scim.write")
     def insert(self, user: ScimUser) -> None:
         try:
             with self._pool.connection() as conn:
@@ -300,6 +316,7 @@ class PostgresScimDirectory(ScimDirectory):
         except errors.UniqueViolation as exc:
             raise UserNameTaken(user.user_name) from exc
 
+    @emits_db_events("scim.write")
     def update(self, user: ScimUser) -> None:
         try:
             with self._pool.connection() as conn:
@@ -312,10 +329,12 @@ class PostgresScimDirectory(ScimDirectory):
         except errors.UniqueViolation as exc:
             raise UserNameTaken(user.user_name) from exc
 
+    @emits_db_events("scim.write")
     def delete(self, user_id: str) -> None:
         with self._pool.connection() as conn:
             conn.execute("DELETE FROM review_scim_users WHERE id = %s", (user_id,))
 
+    @emits_db_events("scim.read")
     def deprovisioned(self, identity: ApproverIdentity) -> ScimUser | None:
         with self._pool.connection() as conn:
             rows = conn.execute(

@@ -73,6 +73,10 @@ def call_with_retries(
     write did not land and the send is safe to repeat.
     """
     last = ""
+    # Structured give-up facts for the error-event stream (RC1-647): the
+    # adapter needs what happened as codes, not a message to parse back.
+    last_status: int | None = None
+    last_kind = "retries_exhausted"
     for attempt in range(MAX_ATTEMPTS):
         delay = BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)]
         ambiguous = False
@@ -80,27 +84,40 @@ def call_with_retries(
             resp = send()
         except SAFE_EXCEPTIONS as exc:
             last = f"connection error: {exc}"
+            last_status, last_kind = None, "connect_error"
         except httpx.HTTPError as exc:
             last = f"connection error: {exc}"
+            last_status, last_kind = None, "ambiguous_outcome"
             ambiguous = True
         else:
             if resp.status_code in SAFE_STATUSES:
                 last = f"HTTP {resp.status_code}"
+                last_status, last_kind = resp.status_code, "retries_exhausted"
                 delay = _retry_after(resp, delay)
             elif resp.status_code in AMBIGUOUS_STATUSES:
                 last = f"HTTP {resp.status_code}"
+                last_status, last_kind = resp.status_code, "ambiguous_outcome"
                 ambiguous = True
             else:
                 return resp
         if ambiguous and not replay_safe:
             if recover is None:
-                raise TargetError(
+                raise _give_up(
                     f"{what}: {last}; the write may have landed and no read-back "
-                    "is available, so it is not replayed - re-run to converge"
+                    "is available, so it is not replayed - re-run to converge",
+                    "ambiguous_outcome",
+                    last_status,
                 )
             landed = recover()
             if landed is not None:
                 return Recovered(landed)
         if attempt + 1 < MAX_ATTEMPTS:
             sleep(delay)
-    raise TargetError(f"{what}: {last} after {MAX_ATTEMPTS} attempts")
+    raise _give_up(f"{what}: {last} after {MAX_ATTEMPTS} attempts", last_kind, last_status)
+
+
+def _give_up(message: str, kind: str, status: int | None) -> TargetError:
+    error = TargetError(message)
+    error.event_kind = kind
+    error.event_status = status
+    return error
