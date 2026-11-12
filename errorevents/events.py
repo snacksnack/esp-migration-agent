@@ -37,7 +37,9 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from telemetry.llmobs import package_version
 
-SCHEMA_VERSION = 1
+# Bumped on any change to the field set or a closed vocabulary (see
+# docs/error_events.md, "Versioning"). v2 (RC1-648): connect_class.
+SCHEMA_VERSION = 2
 EVENT_NAME = "esp_error_event"
 
 # The operations that may appear in an event: a closed set, so a record never
@@ -92,6 +94,65 @@ PROVIDER_CODES = frozenset(
     }
 )
 
+# Why a database connection could not be had (RC1-648). psycopg attaches no
+# SQLSTATE to errors raised while connecting, auth failures included, so the
+# class is derived in-process from libpq's message - which names roles,
+# databases and hosts and is never emitted. `pool_exhausted` is the one class
+# that is not a connect failure: every pooled connection was checked out and
+# the last connect attempt had not failed. `unclassified` is an honest "the
+# message matched nothing", never folded into `network`.
+CONNECT_CLASSES = frozenset(
+    {
+        "auth",
+        "database",
+        "dns",
+        "tls",
+        "timeout",
+        "network",
+        "server",
+        "pool_exhausted",
+        "unclassified",
+    }
+)
+
+# Order matters: the first match wins, and the auth and database messages
+# quote names (a role or database called "ssl_reader" must not read as tls).
+# Messages measured against postgres:18 and Neon, 2026-11-12.
+_CONNECT_PATTERNS = (
+    ("auth", ("password authentication failed", "no pg_hba.conf entry", "role \"",
+              "authentication failed")),
+    ("database", ("database \"",)),
+    ("dns", ("failed to resolve host", "could not translate host name",
+             "nodename nor servname", "name or service not known",
+             "temporary failure in name resolution")),
+    ("tls", ("ssl", "certificate", "tls")),
+    ("timeout", ("timeout expired", "timed out")),
+    ("server", ("too many clients", "remaining connection slots", "the database system is",
+                "too many connections")),
+    ("network", ("connection refused", "could not receive data", "no route to host",
+                 "network is unreachable", "connection reset", "server closed the connection",
+                 "could not connect", "host is unreachable")),
+)
+
+
+def classify_connect_error(exc: BaseException) -> str:
+    """The closed class of a failed connection attempt. Reads the SQLSTATE
+    when the driver provides one, otherwise matches libpq's message; returns
+    a CONNECT_CLASSES member and nothing derived from the text itself."""
+    state = getattr(exc, "sqlstate", None) or ""
+    if state.startswith("28"):
+        return "auth"
+    if state.startswith("3D"):
+        return "database"
+    if state:
+        return "server"
+    text = str(exc).lower()
+    for connect_class, needles in _CONNECT_PATTERNS:
+        if any(needle in text for needle in needles):
+            return connect_class
+    return "unclassified"
+
+
 METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"})
 
 # A route segment that is a plain word, an API version (v3), or a
@@ -144,6 +205,7 @@ class ErrorEvent(BaseModel):
     op: str
     error_class: str
     sqlstate: str | None = None
+    connect_class: str | None = None
     status: int | None = None
     route: str | None = None
     provider_code: str | None = None
@@ -171,6 +233,13 @@ class ErrorEvent(BaseModel):
         # A malformed value cannot be a SQLSTATE, and whatever it is instead
         # has no business in a record: drop it rather than pass it through.
         return value if value is not None and _SQLSTATE.match(value) else None
+
+    @field_validator("connect_class")
+    @classmethod
+    def _known_connect_class(cls, value: str | None) -> str | None:
+        if value is not None and value not in CONNECT_CLASSES:
+            raise ValueError(f"unknown connect class {value!r}")
+        return value
 
     @field_validator("route")
     @classmethod
@@ -204,12 +273,23 @@ def _base(op: str, correlation_id: str | None) -> dict:
     }
 
 
+# The attribute a connection source (review_ui.pgstore's pool) sets on an
+# exception it knows to be a failure to obtain a connection.
+CONNECT_CLASS_ATTR = "esp_connect_class"
+
+
 def db_event(op: str, exc: BaseException, *, correlation_id: str | None = None) -> ErrorEvent:
     """A database-operation failure. SQLSTATE is read by duck typing (psycopg
     puts it on every Error) so this module imports no driver; the message,
-    which names tables and values, is never read."""
+    which names tables and values, is never read here. A connect class is
+    present only when the connection source tagged the exception: an error
+    without a SQLSTATE mid-query is not a connect failure, and guessing one
+    from its text would put a wrong class in front of triage."""
     return ErrorEvent(
-        error_class="db", sqlstate=getattr(exc, "sqlstate", None), **_base(op, correlation_id)
+        error_class="db",
+        sqlstate=getattr(exc, "sqlstate", None),
+        connect_class=getattr(exc, CONNECT_CLASS_ATTR, None),
+        **_base(op, correlation_id),
     )
 
 

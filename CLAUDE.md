@@ -108,8 +108,8 @@ proposes, deterministic Python validates, a human approves.
 - `errorevents/` - structured error events for remote diagnosis (RC1-647,
   ADR-0026, docs/error_events.md): one JSON line per runtime failure, codes
   and enums only (op ID, class, SQLSTATE, status + masked route template,
-  errno, correlation ID, release) - never message text, credentials, contact
-  data, or bodies. Sink is stderr (survives the storage fault; Phase 0B),
+  errno, correlation ID, release; v2 adds connect_class, RC1-648/ADR-0028),
+  never message text, credentials, contact data, or bodies. Sink is stderr (survives the storage fault; Phase 0B),
   plus an optional additive ESP_ERROR_EVENTS_PATH file that flushes/closes
   per event and falls back to stderr. Emission never raises. Wired at
   review_ui/pgstore (decorator), both adapters' `_call`, and the journal.

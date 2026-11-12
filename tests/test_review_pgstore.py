@@ -11,14 +11,17 @@ role db_setup creates, so every check runs under the production grants.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
 import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
+from psycopg_pool import PoolTimeout
 
 from mapping.gate import load_spec
 from review_ui import auth, db_setup
@@ -29,6 +32,7 @@ from review_ui.pgstore import (
     PostgresAuditLog,
     PostgresSessionStore,
     StoreNotReady,
+    check_ready,
     open_pool,
 )
 from specs.model import ApproverIdentity
@@ -398,3 +402,101 @@ def test_migrate_refuses_a_database_newer_than_its_code(db, monkeypatch):
         migrate(ADMIN_URL)
     with psycopg.connect(ADMIN_URL) as conn:
         assert schema_marker(conn) == (newer, newer)  # untouched by the refused run
+
+
+# --- RC1-648: connect failures carry a class, never text --------------------------
+
+
+def with_db_url(url: str, *, password: str | None = None, database: str | None = None,
+                query: str | None = None) -> str:
+    parts = urlsplit(url)
+    netloc = parts.netloc
+    if password is not None:
+        creds, _, host = netloc.rpartition("@")
+        user = creds.split(":", 1)[0]
+        netloc = f"{user}:{password}@{host}"
+    path = f"/{database}" if database is not None else parts.path
+    return urlunsplit((parts.scheme, netloc, path, query or parts.query, ""))
+
+
+def error_events(capsys) -> list[dict]:
+    err = capsys.readouterr().err
+    return [json.loads(line) for line in err.splitlines() if line.startswith("{")]
+
+
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    [
+        ({"password": "wrong-pw-SECRET"}, "auth"),
+        ({"database": "no_such_db_SECRET"}, "database"),
+        ({"query": "sslmode=require"}, "tls"),  # the CI/dev server has no TLS
+    ],
+)
+def test_startup_against_a_bad_url_emits_its_connect_class(db, change, expected, capsys):
+    pool = open_pool(with_db_url(db, **change), timeout=3)
+    try:
+        with pytest.raises(PoolTimeout):
+            check_ready(pool)
+    finally:
+        pool.close()
+    (record,) = error_events(capsys)
+    assert record["op"] == "db.ready_check"
+    assert record["connect_class"] == expected
+    assert "sqlstate" not in record
+    line = json.dumps(record)
+    for leak in ("SECRET", TEST_ROLE, "127.0.0.1", "localhost"):
+        assert leak not in line
+
+
+def test_a_rotated_app_password_reads_as_auth_on_a_running_app(db, capsys):
+    pool = open_pool(db, timeout=3)
+    try:
+        log = PostgresAuditLog(pool)
+        log.record("sign_in", None)  # healthy, with a pooled connection
+        with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
+            conn.execute(f"ALTER ROLE {TEST_ROLE} PASSWORD 'rotated-elsewhere'")
+            # What a Neon scale-to-zero does to every open session.
+            conn.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = %s",
+                (TEST_ROLE,),
+            )
+        # The pooled connection dies mid-use: a server error with a SQLSTATE
+        # and no connect class. Then the pool must reconnect, and cannot.
+        with pytest.raises(psycopg.OperationalError):
+            log.record("sign_in", None)
+        with pytest.raises(PoolTimeout):
+            log.record("sign_in", None)
+    finally:
+        pool.close()
+    dropped, refused = error_events(capsys)
+    assert "connect_class" not in dropped
+    assert refused["op"] == "audit.append"
+    assert refused["connect_class"] == "auth"
+
+
+def test_every_connection_in_use_reads_as_pool_exhausted(db, capsys):
+    pool = open_pool(db, timeout=1)
+    held = [pool.getconn() for _ in range(pool.max_size)]
+    try:
+        with pytest.raises(PoolTimeout):
+            PostgresAuditLog(pool).record("sign_in", None)
+    finally:
+        for conn in held:
+            pool.putconn(conn)
+        pool.close()
+    (record,) = error_events(capsys)
+    assert record["connect_class"] == "pool_exhausted"
+
+
+def test_a_later_good_connection_clears_the_failed_class(db):
+    pool = open_pool(with_db_url(db, password="wrong"), timeout=2)
+    try:
+        with pytest.raises(PoolTimeout), pool.connection():
+            pass
+        assert pool.connect_outcomes.unresolved_failure() == "auth"
+        pool.conninfo = db  # the operator fixes the secret; the pool reconnects
+        with pool.connection():
+            pass
+        assert pool.connect_outcomes.unresolved_failure() is None
+    finally:
+        pool.close()

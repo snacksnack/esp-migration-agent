@@ -14,14 +14,21 @@ keep it awake.
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 
 from cryptography.fernet import Fernet, InvalidToken
-from psycopg import Connection, errors
+from psycopg import Connection, OperationalError, errors
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolTimeout
 
-from errorevents import db_event, emit, emits_db_events
+from errorevents import (
+    CONNECT_CLASS_ATTR,
+    classify_connect_error,
+    db_event,
+    emit,
+    emits_db_events,
+)
 from review_ui.audit import GENESIS, build_entry, log_entry, verify_records
 from review_ui.oidc import AuditSink, Grant, SessionStore
 from review_ui.scim import ScimDirectory, ScimUser, UserNameTaken, matches
@@ -39,12 +46,77 @@ class StoreNotReady(RuntimeError):
     """The database is reachable but not migrated (or the role lacks grants)."""
 
 
-def open_pool(database_url: str) -> ConnectionPool:
-    return ConnectionPool(
+class ConnectOutcomes:
+    """The class of the pool's most recent connect attempt (RC1-648).
+
+    The pool connects on a background worker and retries with backoff; a
+    caller waiting for a connection only ever sees PoolTimeout, with the
+    worker's error logged as text and nowhere else. This keeps that error's
+    class - never its message - so the timeout can say why. A success clears
+    it: one later good connection means the earlier failure is not the cause.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._unresolved: str | None = None
+
+    def failed(self, connect_class: str) -> None:
+        with self._lock:
+            self._unresolved = connect_class
+
+    def succeeded(self) -> None:
+        with self._lock:
+            self._unresolved = None
+
+    def unresolved_failure(self) -> str | None:
+        with self._lock:
+            return self._unresolved
+
+
+def tracked_connection_class(outcomes: ConnectOutcomes) -> type[Connection]:
+    """A Connection whose connect() records each attempt's outcome class."""
+
+    class TrackedConnection(Connection):
+        @classmethod
+        def connect(cls, *args, **kwargs):
+            try:
+                conn = super().connect(*args, **kwargs)
+            except OperationalError as exc:
+                outcomes.failed(classify_connect_error(exc))
+                raise
+            outcomes.succeeded()
+            return conn
+
+    return TrackedConnection
+
+
+class ClassifiedPool(ConnectionPool):
+    """A pool whose PoolTimeout carries why no connection came: the class of
+    the last connect attempt if it failed and nothing has connected since,
+    otherwise pool_exhausted (connections exist and every one is in use)."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        self.connect_outcomes = ConnectOutcomes()
+        super().__init__(
+            *args, connection_class=tracked_connection_class(self.connect_outcomes), **kwargs
+        )
+
+    def getconn(self, timeout: float | None = None) -> Connection:
+        try:
+            return super().getconn(timeout)
+        except PoolTimeout as exc:
+            cause = self.connect_outcomes.unresolved_failure() or "pool_exhausted"
+            setattr(exc, CONNECT_CLASS_ATTR, cause)
+            raise
+
+
+def open_pool(database_url: str, *, timeout: float = 30.0) -> ClassifiedPool:
+    return ClassifiedPool(
         database_url,
         min_size=0,
         max_size=4,
         max_idle=60,
+        timeout=timeout,
         open=True,
         # Neon's pooled endpoints run PgBouncer in transaction mode, where
         # server-side prepared statements do not survive; harmless direct.
@@ -53,7 +125,9 @@ def open_pool(database_url: str) -> ConnectionPool:
 
 
 def check_ready(pool: ConnectionPool) -> None:
-    """Fail at startup, loudly, rather than on the first approval."""
+    """Fail at startup, loudly, rather than on the first approval. A pool
+    that cannot connect at all (a rotated password, a wrong host) emits its
+    connect class here before the process exits."""
     try:
         with pool.connection() as conn:
             conn.execute("SELECT 1 FROM review_audit LIMIT 0")
@@ -68,6 +142,9 @@ def check_ready(pool: ConnectionPool) -> None:
             f"review-gate database is not ready ({exc.__class__.__name__}: {exc}); "
             "run `python -m review_ui.db_setup migrate` and `create-app-role`"
         ) from exc
+    except PoolTimeout as exc:
+        emit(db_event("db.ready_check", exc))
+        raise
 
 
 def row_to_record(row: tuple) -> dict:
@@ -81,6 +158,10 @@ class PostgresAuditLog:
     def __init__(self, pool: ConnectionPool):
         self._pool = pool
 
+    # Decorated as well as record_within: the connection and the commit are
+    # taken here, outside the inner operation, and a failure at either was
+    # silent until RC1-648. Nested decorators emit once, innermost first.
+    @emits_db_events("audit.append")
     def record(self, event: str, actor: ApproverIdentity | None, **detail) -> dict:
         with self._pool.connection() as conn, conn.transaction():
             entry = self.record_within(conn, event, actor, **detail)

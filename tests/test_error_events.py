@@ -14,9 +14,13 @@ import json
 
 import httpx
 import pytest
+from psycopg_pool import PoolTimeout
 
 import errorevents.events as events
 from errorevents import (
+    CONNECT_CLASS_ATTR,
+    CONNECT_CLASSES,
+    classify_connect_error,
     db_event,
     emit,
     emits_db_events,
@@ -29,6 +33,7 @@ from executor.brevo import BrevoClient
 from executor.journal import ExecutionJournal
 from executor.listmonk import ListmonkClient
 from executor.target import TargetError
+from review_ui.pgstore import ConnectOutcomes, open_pool
 
 PLANTED = (
     "alice@example.com",
@@ -64,7 +69,7 @@ def assert_clean(capsys_text: str) -> None:
 
 def test_db_event_carries_codes_only():
     event = db_event("audit.append", FakePgError("42501"))
-    assert event.v == 1
+    assert event.v == 2
     assert event.error_class == "db"
     assert event.sqlstate == "42501"
     assert event.release
@@ -118,6 +123,117 @@ def test_storage_event_takes_errno_never_filename():
 def test_network_event_kind_is_closed():
     with pytest.raises(ValueError, match="unknown network kind"):
         network_event("dns_sadness", "GET /contacts")
+
+
+# --- connect classes (RC1-648) -------------------------------------------------
+
+# libpq/psycopg messages as measured against postgres:18 on 2026-11-12, with
+# planted secrets where real messages carry names. None carries a SQLSTATE.
+MEASURED = {
+    "auth": 'connection to server at "127.0.0.1", port 55432 failed: FATAL:  password '
+    'authentication failed for user "alice@example.com"',
+    "database": 'connection to server at "127.0.0.1", port 55432 failed: FATAL:  database '
+    '"xkeysib-0123456789abcdefSECRET" does not exist',
+    "dns": "failed to resolve host 'alice@example.com': [Errno 8] nodename nor servname "
+    "provided, or not known",
+    "tls": 'connection to server at "127.0.0.1", port 55432 failed: server does not support '
+    "SSL, but SSL was required",
+    "timeout": "connection timeout expired",
+    "network": 'connection to server at "127.0.0.1", port 1 failed: could not receive data '
+    "from server: Connection refused",
+    "server": 'connection to server at "127.0.0.1" failed: FATAL:  sorry, too many clients '
+    "already",
+    "unclassified": "Row contains Alice Smith: something nobody has seen before",
+}
+
+
+class FakeConnectError(Exception):
+    """psycopg-shaped connect failure: sqlstate is None, the message leaks."""
+
+    sqlstate = None
+
+
+@pytest.mark.parametrize(("expected", "message"), sorted(MEASURED.items()))
+def test_each_connect_class_from_its_measured_message(expected, message):
+    assert classify_connect_error(FakeConnectError(message)) == expected
+
+
+def test_every_class_but_pool_exhausted_has_a_measured_case():
+    assert set(MEASURED) == CONNECT_CLASSES - {"pool_exhausted"}
+
+
+def test_auth_wins_over_names_that_look_like_other_classes():
+    # A role or database named after another class must not change the class.
+    message = 'FATAL:  password authentication failed for user "ssl_timeout_reader"'
+    assert classify_connect_error(FakeConnectError(message)) == "auth"
+
+
+def test_sqlstate_beats_the_message_when_the_driver_has_one():
+    exc = FakeConnectError("could not receive data from server")
+    exc.sqlstate = "28P01"
+    assert classify_connect_error(exc) == "auth"
+    exc.sqlstate = "3D000"
+    assert classify_connect_error(exc) == "database"
+    exc.sqlstate = "53300"
+    assert classify_connect_error(exc) == "server"
+
+
+@pytest.mark.parametrize("message", sorted(MEASURED.values()))
+def test_connect_event_carries_class_never_text(message, capsys):
+    exc = FakeConnectError(message)
+    setattr(exc, CONNECT_CLASS_ATTR, classify_connect_error(exc))
+    emit(db_event("sessions.load", exc))
+    (record,) = stderr_events(capsys)
+    assert record["connect_class"] in CONNECT_CLASSES
+    assert "sqlstate" not in record
+    assert_clean(json.dumps(record))
+    for word in ("127.0.0.1", "FATAL", "SSL", "failed"):
+        assert word not in json.dumps(record)
+
+
+def test_untagged_error_gets_no_connect_class():
+    # A mid-query error without SQLSTATE is not a connect failure; db_event
+    # never guesses one from the text.
+    assert db_event("audit.read", FakeConnectError(MEASURED["network"])).connect_class is None
+
+
+def test_unknown_connect_class_refuses():
+    exc = FakeConnectError("x")
+    setattr(exc, CONNECT_CLASS_ATTR, "alice@example.com")
+    with pytest.raises(ValueError, match="unknown connect class"):
+        db_event("sessions.load", exc)
+
+
+def test_connect_outcomes_success_clears_the_failure():
+    outcomes = ConnectOutcomes()
+    assert outcomes.unresolved_failure() is None
+    outcomes.failed("auth")
+    assert outcomes.unresolved_failure() == "auth"
+    outcomes.succeeded()
+    assert outcomes.unresolved_failure() is None
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("postgresql://u:pw-SECRET@nosuchhost.invalid:5432/db?connect_timeout=2", "dns"),
+        ("postgresql://u:pw-SECRET@127.0.0.1:1/db?connect_timeout=2", "network"),
+    ],
+)
+def test_pool_timeout_carries_the_real_connect_class(url, expected, capsys):
+    # Real libpq, no server needed: the background worker's failure reaches
+    # the waiting caller as a class on the PoolTimeout and in its event.
+    pool = open_pool(url, timeout=2)
+    try:
+        with pytest.raises(PoolTimeout) as caught, pool.connection():
+            pass
+    finally:
+        pool.close()
+    assert getattr(caught.value, CONNECT_CLASS_ATTR) == expected
+    emit(db_event("sessions.load", caught.value))
+    (record,) = stderr_events(capsys)
+    assert record["connect_class"] == expected
+    assert "pw-SECRET" not in json.dumps(record)
 
 
 # --- sink -----------------------------------------------------------------------
