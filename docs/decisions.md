@@ -3,6 +3,36 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0028: A failed connect says why, as a class; the pool tags its timeout (2026-11-12)
+
+**Context.** RC1-639 measured that psycopg attaches no SQLSTATE to errors
+raised while connecting, authentication failures included. In ESP a rotated
+`esp_app` password surfaced as `PoolTimeout` after 30 s and, under
+ADR-0026, a db event with no SQLSTATE: emitted, but indistinguishable from
+DNS, network, TLS or an exhausted pool. Building RC1-648 also showed that
+`PostgresAuditLog.record` took its connection outside the decorated inner
+operation (RC1-583), so a connect failure on an audit write emitted nothing.
+
+**Decision.** Db events gain `connect_class`, a closed vocabulary (`auth`,
+`database`, `dns`, `tls`, `timeout`, `network`, `server`, `pool_exhausted`,
+`unclassified`), schema `v` 2. `errorevents.classify_connect_error` reads a
+SQLSTATE when there is one, else matches libpq's message in a fixed order
+(auth and database first, because those messages quote names) and returns
+only the class. The pool (`ClassifiedPool`) uses a Connection subclass that
+records each connect attempt's class; a `PoolTimeout` is tagged with the last
+unresolved failure, or `pool_exhausted` when the last attempt succeeded.
+`db_event` copies the tag and never classifies on its own, so a mid-query
+drop is not mislabeled a connect failure. `check_ready` emits on
+`PoolTimeout`, and `record` is decorated. Fallback is `unclassified`, not
+`network`, unlike the install kit's preflight probe, which should follow.
+
+**Consequences.** A shared bundle now separates "the password changed" from
+"the network moved" without any message text. The tag reflects the pool's
+most recent attempt, not a per-request trace: a failure followed by no
+further attempt during a wait is still reported, which is the case that
+matters. Schema v2 lands before the RC1-594 rules freeze (risk R1).
+docs/error_events.md gains the class table and a versioning section.
+
 ## ADR-0027: A release is a signed digest plus a manifest; the schema says how far back it can roll (2026-11-12)
 
 **Context.** The Customer Install Kit (RC1-594, Phase 2 RC1-640) installs ESP
