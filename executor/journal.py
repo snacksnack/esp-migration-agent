@@ -31,6 +31,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from errorevents import emit, storage_event
 from executor.engine import ExecutionSummary, PlanDiff
 from executor.target import TargetSubscriber
 from specs.model import MappingSpec
@@ -121,15 +122,24 @@ class ExecutionJournal:
     def __init__(self, path: Path):
         self.path = path
         self.run_id = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(3)}"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = path.open("a", encoding="utf-8")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self._fh = path.open("a", encoding="utf-8")
+        except OSError as exc:
+            emit(storage_event("journal.open", exc))
+            raise
         self._destination: dict | None = None
         self._list_name: str | None = None
 
     def _event(self, event: str, **fields) -> None:
         record = {"event": event, "run_id": self.run_id, "at": _now(), **fields}
-        self._fh.write(json.dumps(record, separators=(",", ":")) + "\n")
-        self._fh.flush()  # a crash after this line still leaves the event
+        try:
+            self._fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+            self._fh.flush()  # a crash after this line still leaves the event;
+            # the flush also surfaces ENOSPC a buffered write would hide (RC1-647)
+        except OSError as exc:
+            emit(storage_event("journal.append", exc))
+            raise
 
     def run_start(
         self,
@@ -209,4 +219,8 @@ class ExecutionJournal:
         )
 
     def close(self) -> None:
-        self._fh.close()
+        try:
+            self._fh.close()  # close errors are write errors (buffered tail)
+        except OSError as exc:
+            emit(storage_event("journal.close", exc))
+            raise

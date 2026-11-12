@@ -19,6 +19,7 @@ from collections.abc import Callable
 import httpx
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from errorevents import emit, http_event, network_event, safe_route
 from executor.plan import DesiredSubscriber, PlannedCampaign
 from executor.retries import IDEMPOTENT_METHODS, Recovered, call_with_retries
 from executor.target import TargetError, TargetSubscriber
@@ -77,19 +78,36 @@ class ListmonkClient:
         path: str,
         what: str,
         recover: Callable[[], dict | None] | None = None,
+        route: str | None = None,
         **kwargs,
     ) -> dict | list:
-        result = call_with_retries(
-            lambda: self._http.request(method, path, **kwargs),
-            what=what,
-            replay_safe=method in IDEMPOTENT_METHODS,
-            recover=recover,
-            sleep=self._sleep,
-        )
+        # `route` is the template for the error-event stream (RC1-647) when
+        # `path` interpolates a value; static paths are their own template,
+        # and safe_route masks whatever is not a plain segment either way.
+        # Listmonk error bodies carry message text only, so no provider code.
+        template = safe_route(method, route or path)
+        try:
+            result = call_with_retries(
+                lambda: self._http.request(method, path, **kwargs),
+                what=what,
+                replay_safe=method in IDEMPOTENT_METHODS,
+                recover=recover,
+                sleep=self._sleep,
+            )
+        except TargetError as exc:
+            emit(
+                network_event(
+                    getattr(exc, "event_kind", "retries_exhausted"),
+                    template,
+                    status=getattr(exc, "event_status", None),
+                )
+            )
+            raise
         if isinstance(result, Recovered):
             self.recovered_calls += 1
             return result.data
         if result.status_code >= 400:
+            emit(http_event(result.status_code, template))
             raise TargetError(f"{what}: HTTP {result.status_code} {result.text[:300]}")
         return result.json().get("data")
 
@@ -255,6 +273,7 @@ class ListmonkClient:
             "PUT",
             f"/subscribers/{existing.id}",
             f"update subscriber {desired.email}",
+            route="/subscribers/{id}",
             json=self._subscriber_body(desired, list_id, keep_lists=existing.list_ids),
         )
         if desired.subscription == "unsubscribed" and desired.status != "blocklisted":
@@ -288,7 +307,8 @@ class ListmonkClient:
         out: dict[str, PlannedCampaign] = {}
         for row in data["results"]:
             body = self._call(
-                "GET", f"/campaigns/{row['id']}", f"campaign {row['name']!r}"
+                "GET", f"/campaigns/{row['id']}", f"campaign {row['name']!r}",
+                route="/campaigns/{id}",
             )
             out[row["name"]] = PlannedCampaign(
                 name=row["name"],
@@ -325,6 +345,7 @@ class ListmonkClient:
             "PUT",
             f"/campaigns/{row['id']}",
             f"update campaign {name!r}",
+            route="/campaigns/{id}",
             json={
                 "name": campaign.name,
                 "subject": campaign.subject,

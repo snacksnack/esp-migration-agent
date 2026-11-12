@@ -105,6 +105,14 @@ proposes, deterministic Python validates, a human approves.
   the reviewed one: data-only writes a rebound DRAFT for the spec owner to
   re-approve, structural writes nothing (re-propose).
 - `scripts/demo.sh` + `docs/demo.md` - the recorded two-minute demo arc.
+- `errorevents/` - structured error events for remote diagnosis (RC1-647,
+  ADR-0026, docs/error_events.md): one JSON line per runtime failure, codes
+  and enums only (op ID, class, SQLSTATE, status + masked route template,
+  errno, correlation ID, release) - never message text, credentials, contact
+  data, or bodies. Sink is stderr (survives the storage fault; Phase 0B),
+  plus an optional additive ESP_ERROR_EVENTS_PATH file that flushes/closes
+  per event and falls back to stderr. Emission never raises. Wired at
+  review_ui/pgstore (decorator), both adapters' `_call`, and the journal.
 - `telemetry/` - LLM Obs tracing + esp_migration.* run metrics (ADR-0008).
   Decoration by contract: no ddtrace (`uv sync --group obs`) or no DD_API_KEY
   in the process env means quiet no-ops; a failed POST is loud on stderr but

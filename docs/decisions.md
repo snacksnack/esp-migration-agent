@@ -3,6 +3,50 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0026: Error events are codes, never text; stderr is the sink that survives (2026-11-11)
+
+**Context.** The Customer Install Kit (RC1-594) deploys ESP into an
+environment the vendor cannot see; remote triage reads only a redacted
+bundle the customer chooses to share. The Phase 0B spike proved the fault
+families produce categorical evidence - SQLSTATE 42501 at an audit write,
+HTTP 401 with a provider error code at a denied upload endpoint, errno 28 at
+a storage flush - and also proved two sharp edges: a buffered write to a
+100%-full filesystem appears to succeed until flush or close, and the
+process log stream keeps working while the data volume is dead. RC1-647
+turns that minimal instrumentation into a reliable, versioned contract.
+
+**Decision.** A runtime failure emits one JSON line (`errorevents/`), built
+only from closed vocabularies and mechanical codes: operation ID from a
+registered set, error class (`db`/`http`/`network`/`storage`), SQLSTATE,
+HTTP status plus a masked route template, provider error code only when it
+is one of Brevo's documented enum values, errno with its symbolic name, an
+opaque correlation ID, release version, timestamp. Exception message text,
+credentials, contact fields, and request or response bodies are
+unrepresentable: the schema has no field that could hold them, routes are
+re-masked by a validator so a concrete ID or quoted email cannot pass, and
+tests plant secrets in exception messages and prove they never surface.
+
+The primary sink is stderr - on the supported profile, the platform log
+stream that Phase 0B showed survives the storage fault. An optional file
+sink (`ESP_ERROR_EVENTS_PATH`) is additive: it flushes and closes per event
+because that is where ENOSPC lives, and any failure there leaves the event
+already standing on stderr plus a sink-failure event beside it. Emission
+never raises and never phones home; existing Datadog telemetry is separate
+and unchanged.
+
+**Wiring.** Three choke points cover the Phase 0B families: the Postgres
+stores (`review_ui/pgstore.py`, a decorator that emits when a propagating
+exception carries a SQLSTATE - converted domain outcomes stay silent), both
+target adapters' `_call` (fatal statuses and the retry taxonomy's structured
+give-up verdicts), and the execution journal's open/append/close. The
+journal itself stays verbose by design: it is the operator's own record;
+the event stream is the only share-safe diagnostic surface.
+
+**Non-claim.** A record localizes a failure; it does not prove a root cause.
+A 403 on an upload may be an authorization failure or a proxy policy - the
+triage follow-up channel (customer-mediated, kit ADR 0002) exists for
+exactly that distinction. docs/error_events.md carries the contract.
+
 ## ADR-0025: A credential-provisioning tool emits to a file, not to stdout (2026-11-04)
 
 **Context.** CodeQL's default setup, enabled across the estate in RC1-613,

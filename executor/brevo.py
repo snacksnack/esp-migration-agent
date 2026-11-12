@@ -34,6 +34,7 @@ from collections.abc import Callable
 import httpx
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from errorevents import emit, http_event, network_event, safe_route
 from executor.plan import DesiredSubscriber, PlannedCampaign
 from executor.queries import evaluate_query
 from executor.retries import IDEMPOTENT_METHODS, Recovered, call_with_retries
@@ -164,6 +165,17 @@ def consent_from_brevo(label: str | None, blacklisted: bool) -> tuple[str, str]:
     return ("blocklisted", "unsubscribed") if blacklisted else ("enabled", "confirmed")
 
 
+def _provider_code(resp: httpx.Response) -> str | None:
+    """Brevo's error `code` field: a documented closed enum, safe for the
+    event stream when (and only when) it is one of the known values. The
+    `message` beside it echoes emails and keys and is never read."""
+    try:
+        code = resp.json().get("code")
+    except ValueError:
+        return None
+    return code if isinstance(code, str) else None
+
+
 class BrevoClient:
     def __init__(
         self,
@@ -192,22 +204,38 @@ class BrevoClient:
         ok_codes: set[int] | None = None,
         replay_safe: bool | None = None,
         recover: Callable[[], dict | None] | None = None,
+        route: str | None = None,
         **kwargs,
     ) -> dict:
+        # `route` is the template for the error-event stream (RC1-647) when
+        # `path` interpolates a value; static paths are their own template,
+        # and safe_route masks whatever is not a plain segment either way.
+        template = safe_route(method, route or path)
         if replay_safe is None:
             replay_safe = method in IDEMPOTENT_METHODS
-        result = call_with_retries(
-            lambda: self._http.request(method, path, **kwargs),
-            what=what,
-            replay_safe=replay_safe,
-            recover=recover,
-            sleep=self._sleep,
-        )
+        try:
+            result = call_with_retries(
+                lambda: self._http.request(method, path, **kwargs),
+                what=what,
+                replay_safe=replay_safe,
+                recover=recover,
+                sleep=self._sleep,
+            )
+        except TargetError as exc:
+            emit(
+                network_event(
+                    getattr(exc, "event_kind", "retries_exhausted"),
+                    template,
+                    status=getattr(exc, "event_status", None),
+                )
+            )
+            raise
         if isinstance(result, Recovered):
             self.recovered_calls += 1
             return result.data
         resp = result
         if resp.status_code >= 400 and resp.status_code not in (ok_codes or set()):
+            emit(http_event(resp.status_code, template, provider_code=_provider_code(resp)))
             raise TargetError(f"{what}: HTTP {resp.status_code} {resp.text[:300]}")
         return resp.json() if resp.content else {}
 
@@ -303,6 +331,7 @@ class BrevoClient:
                 "POST",
                 f"/contacts/attributes/normal/{name}",
                 f"define attribute {name}",
+                route="/contacts/attributes/normal/{name}",
                 ok_codes={409},
                 replay_safe=True,
                 json={"type": attr_type},
@@ -360,6 +389,7 @@ class BrevoClient:
             "POST",
             f"/contacts/lists/{list_id}/contacts/add",
             f"attach {existing.email}",
+            route="/contacts/lists/{list_id}/contacts/add",
             replay_safe=True,  # adding a member twice is a no-op
             json={"emails": [existing.email]},
         )
@@ -372,6 +402,7 @@ class BrevoClient:
                 "GET",
                 f"/contacts/lists/{list_id}/contacts",
                 "list contacts",
+                route="/contacts/lists/{list_id}/contacts",
                 params={"limit": PAGE_SIZE, "offset": offset},
             )
             rows = data.get("contacts") or []
@@ -414,6 +445,7 @@ class BrevoClient:
             "PUT",
             f"/contacts/{existing.id}",
             f"update contact {desired.email}",
+            route="/contacts/{id}",
             ok_codes={204},
             json={k: v for k, v in body.items() if k != "updateEnabled"},
         )
@@ -433,7 +465,8 @@ class BrevoClient:
         out: dict[str, PlannedCampaign] = {}
         for row in self._campaign_rows():
             detail = self._call(
-                "GET", f"/emailCampaigns/{row['id']}", f"campaign {row['name']!r}"
+                "GET", f"/emailCampaigns/{row['id']}", f"campaign {row['name']!r}",
+                route="/emailCampaigns/{id}",
             )
             out[row["name"]] = PlannedCampaign(
                 name=row["name"],
@@ -478,6 +511,7 @@ class BrevoClient:
             "PUT",
             f"/emailCampaigns/{row['id']}",
             f"update campaign {name!r}",
+            route="/emailCampaigns/{id}",
             ok_codes={204},
             json=self._campaign_body(campaign, list_id),
         )
