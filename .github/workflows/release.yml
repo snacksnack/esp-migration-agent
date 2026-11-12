@@ -45,10 +45,13 @@ jobs:
             exit 1
           fi
 
+      # --all-groups, as ci.yml: the review_ui, release and evals-scorer tests
+      # import the ui/evals groups. A bare `uv sync` failed collection here
+      # from 10-27 on, unseen until the v0.1.1 tag (RC1-640).
       - name: Lint and test the tagged version
         id: test_gate
         run: |
-          uv sync
+          uv sync --all-groups
           uv run ruff check .
           uv run pytest
 
