@@ -88,3 +88,28 @@ jobs:
 
       - name: Tests (vitest)
         run: npm test
+
+  # The image must boot, not just the checkout (RC1-647: a new top-level
+  # package missing from the Dockerfile's COPY list passed every test and
+  # crash-looped in production). Build the real image, start it with no
+  # secrets, and require /healthz 200. Fly Deploy waits on this workflow.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -t esp-ci .
+
+      - name: Boot and health check
+        run: |
+          docker run -d --name esp -p 8080:8080 esp-ci
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://localhost:8080/healthz; then
+              echo "healthz 200 after ${i} tries"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::image never served /healthz"
+          docker logs esp
+          exit 1
