@@ -3,6 +3,40 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0029: The image carries the pipeline; conformance fixtures are namespaced, fenced, and still gated (2026-11-12)
+
+**Context.** The Customer Install Kit's conformance phase (RC1-594, RC1-641)
+has to prove the INSTALLED workflow migrates, not that `/healthz` answers.
+Two gaps stood in the way. The image held the review gate only (no
+`executor/`, no `seeding/`), so an installed release could not run a
+migration at all. And since RC1-566 bound `--target` to `spec.target`, no
+spec could name Brevo (no consent dialect existed for it), so the CLIs
+refused `--target brevo` for every spec; only the integration test, which
+skips the CLI, still reached Brevo.
+
+**Decision.** The image now copies `executor/`, `seeding/` and a new
+`conformance/` package. Brevo gets the canonical consent dialect, the one
+its adapter already maps label for label (`CANONICAL_STATES`), with the
+plan's strict `subscribable` unchanged, so the suppression invariant judges
+a Brevo spec exactly as a Listmonk one (a test pins the two tables
+together). `python -m conformance fixture` writes one synthetic export per
+run, every address `cik-<run>-NNNN@<domain>` and the audience, list and
+campaign `cik-conformance <run>`, plus the reviewed spec bound to that
+export as a DRAFT: it still has to pass `mapping.gate.approve`, and the
+executor still reads it only through `load_approved`. `python -m
+conformance cleanup` deletes that run's records from Brevo and reports what
+remains. It is the product's only delete path, fenced by the namespace: it
+refuses an expected record that names anything outside the run, never
+touches a contact outside the pattern, and keeps a list that holds one.
+
+**Consequences.** Reruns never converge onto an earlier run's contacts, so
+a run cannot pass on someone else's writes. Brevo is reachable from the
+documented CLIs again (`scripts/demo.sh` with `ESP_DEMO_TARGET=brevo`
+needs a Brevo-target spec to use it). The fixture drops the reviewed spec's
+segment mappings: their ground truth is the genuine fixture's. CI's image
+job now builds a fixture inside the image, checks the gate refuses the
+draft, approves it and dry-runs it offline. Released as v0.1.4.
+
 ## ADR-0028: A failed connect says why, as a class; the pool tags its timeout (2026-11-12)
 
 **Context.** RC1-639 measured that psycopg attaches no SQLSTATE to errors

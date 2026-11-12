@@ -1,6 +1,6 @@
 [project]
 name = "esp-migration-agent"
-version = "0.1.3"
+version = "0.1.4"
 description = "Gated email-platform migration engine: LLM proposes, deterministic Python validates, human approves."
 requires-python = ">=3.12"
 dependencies = [

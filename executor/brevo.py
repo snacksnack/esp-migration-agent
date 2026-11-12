@@ -48,7 +48,8 @@ CONSENT_ATTR = "ESP_CONSENT"
 FOLDER_NAME = "ESP migration"
 
 # Canonical (status, subscription) per consent label - must mirror
-# executor.plan.CONSENT_DIALECTS; the adapter maps labels, never invents them.
+# executor.plan.CANONICAL_DIALECT (Brevo specs use it too, ADR-0029); the
+# adapter maps labels, never invents them.
 CANONICAL_STATES = {
     "enabled/confirmed": ("enabled", "confirmed"),
     "enabled/unconfirmed": ("enabled", "unconfirmed"),
@@ -514,4 +515,32 @@ class BrevoClient:
             route="/emailCampaigns/{id}",
             ok_codes={204},
             json=self._campaign_body(campaign, list_id),
+        )
+
+    # --- conformance cleanup (RC1-641, ADR-0029) --------------------------------
+    # Deletes exist ONLY for the install kit's conformance fixtures. The
+    # migration path never deletes (destination writes are never reversed by
+    # the product); conformance.cleanup refuses any name or address outside
+    # its run's namespace before it reaches these. A 404 is "already gone".
+
+    def find_campaign_id(self, name: str) -> int | None:
+        row = self._find_campaign_row(name)
+        return None if row is None else row["id"]
+
+    def delete_contact(self, contact_id: int) -> None:
+        self._call(
+            "DELETE", f"/contacts/{contact_id}", "delete contact",
+            route="/contacts/{id}", ok_codes={404},
+        )
+
+    def delete_list(self, list_id: int) -> None:
+        self._call(
+            "DELETE", f"/contacts/lists/{list_id}", "delete list",
+            route="/contacts/lists/{list_id}", ok_codes={404},
+        )
+
+    def delete_campaign(self, campaign_id: int) -> None:
+        self._call(
+            "DELETE", f"/emailCampaigns/{campaign_id}", "delete campaign",
+            route="/emailCampaigns/{id}", ok_codes={404},
         )

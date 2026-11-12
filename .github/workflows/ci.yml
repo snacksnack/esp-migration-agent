@@ -113,3 +113,23 @@ jobs:
           echo "::error::image never served /healthz"
           docker logs esp
           exit 1
+
+      # RC1-641: the install kit's conformance run needs the pipeline inside
+      # the image. Build a fixture, prove the gate refuses the draft, approve
+      # it, and dry-run it offline (no destination credentials in CI).
+      - name: Conformance pipeline in the image
+        run: |
+          docker exec esp sh -c '
+            set -e
+            uv run --no-sync python -m conformance fixture --run-id ci-smoke --out /tmp/fx
+            if uv run --no-sync python -m executor.run --spec /tmp/fx/spec.draft.yaml \
+                --audience-dir /tmp/fx/audience --supplement-dir /tmp/fx/api_supplement \
+                --target brevo; then
+              echo "draft spec was not refused"; exit 1
+            fi
+            uv run --no-sync python -m mapping.review approve /tmp/fx/spec.draft.yaml \
+              --by ci --out /tmp/fx/spec.approved.yaml
+            uv run --no-sync python -m executor.run --spec /tmp/fx/spec.approved.yaml \
+              --audience-dir /tmp/fx/audience --supplement-dir /tmp/fx/api_supplement \
+              --target brevo
+          '
