@@ -105,6 +105,13 @@ proposes, deterministic Python validates, a human approves.
   the reviewed one: data-only writes a rebound DRAFT for the spec owner to
   re-approve, structural writes nothing (re-propose).
 - `scripts/demo.sh` + `docs/demo.md` - the recorded two-minute demo arc.
+- `conformance/` - install-kit conformance fixtures (RC1-641, ADR-0029):
+  `python -m conformance fixture` writes a run-namespaced synthetic export
+  plus the reviewed spec bound to it as a DRAFT (approve it through the
+  gate like any spec); `cleanup` deletes only that run's Brevo records
+  (the product's one delete path, namespace-fenced). The image ships
+  executor/ + seeding/ + conformance/ so the kit runs a real migration
+  inside the customer machine.
 - `errorevents/` - structured error events for remote diagnosis (RC1-647,
   ADR-0026, docs/error_events.md): one JSON line per runtime failure, codes
   and enums only (op ID, class, SQLSTATE, status + masked route template,

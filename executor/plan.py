@@ -62,24 +62,33 @@ class ConsentState(BaseModel):
     subscribable: bool
 
 
-# Canonical labels a reviewed ConsentMapping.target_status may use, per
-# target. `subscribable` is strict: unconfirmed counts as subscribable
-# because a confirm click away is not suppressed.
+# Canonical labels a reviewed ConsentMapping.target_status may use.
+# `subscribable` is strict: unconfirmed counts as subscribable because a
+# confirm click away is not suppressed.
+CANONICAL_DIALECT: dict[str, ConsentState] = {
+    "enabled/confirmed": ConsentState(
+        status="enabled", subscription="confirmed", subscribable=True
+    ),
+    "enabled/unconfirmed": ConsentState(
+        status="enabled", subscription="unconfirmed", subscribable=True
+    ),
+    "unsubscribed": ConsentState(
+        status="enabled", subscription="unsubscribed", subscribable=False
+    ),
+    "blocklisted": ConsentState(
+        status="blocklisted", subscription="unsubscribed", subscribable=False
+    ),
+}
+
+# Per target. Brevo speaks the canonical dialect (RC1-641, ADR-0029): its
+# adapter maps each label onto Brevo's one consent control on write and back
+# on read (executor/brevo.py CANONICAL_STATES/BREVO_BLACKLISTED), and keeping
+# the plan's strict `subscribable` means the suppression invariant judges a
+# Brevo spec exactly as it judges a Listmonk one. Without this entry a spec
+# could not name Brevo, so `--target brevo` was refused for every spec.
 CONSENT_DIALECTS: dict[str, dict[str, ConsentState]] = {
-    "listmonk": {
-        "enabled/confirmed": ConsentState(
-            status="enabled", subscription="confirmed", subscribable=True
-        ),
-        "enabled/unconfirmed": ConsentState(
-            status="enabled", subscription="unconfirmed", subscribable=True
-        ),
-        "unsubscribed": ConsentState(
-            status="enabled", subscription="unsubscribed", subscribable=False
-        ),
-        "blocklisted": ConsentState(
-            status="blocklisted", subscription="unsubscribed", subscribable=False
-        ),
-    },
+    "listmonk": CANONICAL_DIALECT,
+    "brevo": CANONICAL_DIALECT,
 }
 
 # Which source-record attribute each mappable source field reads from.
