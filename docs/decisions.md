@@ -3,6 +3,39 @@
 Architecture decision records, newest first. One entry per decision that would
 otherwise need re-litigating. Epic: RC1-542; this file starts life in RC1-543.
 
+## ADR-0027: A release is a signed digest plus a manifest; the schema says how far back it can roll (2026-11-12)
+
+**Context.** The Customer Install Kit (RC1-594, Phase 2 RC1-640) installs ESP
+into a customer's own Fly org. Until now a "release" was a git tag that
+proved tests passed; the only image was whatever `fly deploy` built from a
+checkout. A customer cannot verify that, and an image rollback could not
+know whether the database it would run against had moved past it.
+
+**Decision.** A `v*` tag publishes, after the gates pass, a single-platform
+amd64 image to GHCR by digest, cosign-signed keyless from this workflow's
+GitHub OIDC identity with the SPDX SBOM attached as an attestation, and a
+GitHub release carrying `release.json` (`release/manifest.py`: version,
+commit, image digest, SBOM sha256, `db_schema`), its Sigstore bundle, and
+the SBOM. The manifest is what installers verify: identity pinned to
+`release.yml@refs/tags/vX`, then deploy by the digest inside it. The
+workflow verifies its own output the same way before creating the release.
+
+`migrate` records `review_schema_version (version, compatible_with)` from
+`SCHEMA_VERSION`/`SCHEMA_COMPATIBLE_WITH` in db_setup.py, and refuses a
+database whose recorded version is newer than its own code, because
+re-applying an older schema.sql can replace newer functions and would
+rewrite the marker. `compatible_with` is the oldest schema whose code still
+runs: an application rollback to release R is safe only if the database's
+`compatible_with <= R.db_schema.version`. The app role has no grant on the
+marker; installers read it with the owner URL.
+
+**Consequences.** Image rollback never claims to reverse a migration: when
+the marker says the target is too old, the installer stops and the recovery
+is a data restore the customer owns. A schema change now needs a deliberate
+`SCHEMA_VERSION` bump in the same PR. `.dockerignore` keeps local env files
+and the 264 MB of venv/node_modules out of the build context. GHCR package
+visibility must be public for a customer to pull without a vendor login.
+
 ## ADR-0026: Error events are codes, never text; stderr is the sink that survives (2026-11-11)
 
 **Context.** The Customer Install Kit (RC1-594) deploys ESP into an

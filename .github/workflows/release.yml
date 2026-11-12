@@ -1,8 +1,9 @@
 name: Release
 
 # A pushed v* tag is the release (the agent-evals pattern, RC1-459): nothing
-# here deploys to infrastructure, so the tag is the moment a version becomes
-# the demo-able artifact. The job proves the tag names a version that lints
+# here deploys to infrastructure (the signed image is published for customer
+# installs, RC1-640, never deployed from here), so the tag is the moment a
+# version becomes the demo-able artifact. The job proves the tag names a version that lints
 # and tests clean, then reports it to Datadog DORA - the estate-standard
 # Actions -> Datadog deploy path (RC1-548). Tests also run in ci.yml on the
 # same push; the gates here are what the DORA events key off.
@@ -65,6 +66,107 @@ jobs:
         env:
           DD_API_KEY: ${{ secrets.DD_API_KEY }}
         run: scripts/report_dora_deployment.sh esp-migration-agent "$RELEASE_STARTED_AT" "$(git rev-parse HEAD)"
+
+  # The signed, installable artifact (RC1-640, ADR-0027). Runs only after the
+  # tag gate and the tests pass, so nothing broken is ever signed. Keyless:
+  # the signing identity is this workflow's GitHub OIDC token at this tag,
+  # witnessed in Rekor (customer-install-kit ADR 0003); no private key exists.
+  #   image     ghcr.io/snacksnack/esp-migration-agent@sha256:... (cosign-signed,
+  #             SBOM attached as an spdxjson attestation)
+  #   release   release.json + release.json.sigstore.json + sbom.spdx.json on
+  #             the GitHub release; the manifest binds digest, SBOM sha256 and
+  #             schema compatibility, and is what installers verify.
+  publish:
+    name: Publish signed image
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # create the GitHub release
+      packages: write    # push to GHCR
+      id-token: write    # keyless signing identity
+    env:
+      IMAGE: ghcr.io/snacksnack/esp-migration-agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # One platform, no buildx attestations: the pushed digest is the image
+      # manifest itself, not an index, so the digest Fly deploys is the
+      # digest that was signed.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE }}:${{ github.ref_name }}
+          build-args: GIT_SHA=${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: SBOM of the pushed digest
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Sign the image and attach the SBOM
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$REF"
+          cosign attest --yes --type spdxjson --predicate sbom.spdx.json "$REF"
+
+      - name: Write and sign the release manifest
+        run: |
+          set -euo pipefail
+          uv run --group ui python -m release.manifest \
+            --version "${GITHUB_REF_NAME#v}" --commit "$(git rev-parse HEAD)" \
+            --image "$IMAGE" --digest "${{ steps.build.outputs.digest }}" \
+            --sbom sbom.spdx.json --out release.json
+          uvx --from sigstore==4.5.1 sigstore sign --bundle release.json.sigstore.json release.json
+
+      # Verify as the customer will, before anything is published: if this
+      # identity check fails, the release never reaches the installer.
+      - name: Verify as an installer would
+        run: |
+          set -euo pipefail
+          uvx --from sigstore==4.5.1 sigstore verify identity \
+            --bundle release.json.sigstore.json \
+            --cert-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            release.json
+          cosign verify "$IMAGE@${{ steps.build.outputs.digest }}" \
+            --certificate-identity "https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+
+      - name: GitHub release with the signed files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release.json release.json.sigstore.json sbom.spdx.json \
+            --title "$GITHUB_REF_NAME" --notes "Image: $IMAGE@${{ steps.build.outputs.digest }}"
 
   # Announce the release in #releases (RC1-497): the PRs merged since the
   # previous tag. The logic and the never-fails guarantee live in
