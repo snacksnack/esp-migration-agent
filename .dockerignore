@@ -1,0 +1,12 @@
+# RC1-640: the build context was ~264 MB (venv, node_modules) and included
+# local credential files. The Dockerfile copies named paths only; this keeps
+# everything else, secrets first, out of the context.
+.env*
+*.swp
+.git
+.venv
+**/__pycache__
+review_ui/frontend/node_modules
+review_ui/frontend/dist
+.pytest_cache
+.ruff_cache

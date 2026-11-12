@@ -21,10 +21,10 @@ from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from mapping.gate import load_spec
-from review_ui import auth
+from review_ui import auth, db_setup
 from review_ui.api import create_app
 from review_ui.config import ReviewUiSettings
-from review_ui.db_setup import create_app_role, migrate, verify
+from review_ui.db_setup import SetupError, create_app_role, migrate, schema_marker, verify
 from review_ui.pgstore import (
     PostgresAuditLog,
     PostgresSessionStore,
@@ -51,7 +51,10 @@ TEST_ROLE = "esp_app_test"
 
 def reset_schema() -> None:
     with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
-        conn.execute("DROP TABLE IF EXISTS review_audit, review_sso_sessions, review_scim_users")
+        conn.execute(
+            "DROP TABLE IF EXISTS review_audit, review_sso_sessions, review_scim_users,"
+            " review_schema_version"
+        )
 
 
 @pytest.fixture()
@@ -376,3 +379,22 @@ def test_a_failed_revocation_record_rolls_the_claim_back(db):
         assert events() == [*before, "access_revoked"]
     finally:
         pool.close()
+
+
+def test_migrate_records_the_schema_marker_and_the_app_role_cannot_read_it(db):
+    with psycopg.connect(ADMIN_URL) as conn:
+        assert schema_marker(conn) == (db_setup.SCHEMA_VERSION, db_setup.SCHEMA_COMPATIBLE_WITH)
+    with psycopg.connect(db) as conn, pytest.raises(psycopg.errors.InsufficientPrivilege):
+        conn.execute("SELECT * FROM review_schema_version")
+
+
+def test_migrate_refuses_a_database_newer_than_its_code(db, monkeypatch):
+    newer = db_setup.SCHEMA_VERSION + 1
+    with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
+        conn.execute(
+            "UPDATE review_schema_version SET version = %s, compatible_with = %s", (newer, newer)
+        )
+    with pytest.raises(SetupError, match=f"schema is v{newer}"):
+        migrate(ADMIN_URL)
+    with psycopg.connect(ADMIN_URL) as conn:
+        assert schema_marker(conn) == (newer, newer)  # untouched by the refused run

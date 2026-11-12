@@ -22,6 +22,7 @@ printed.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import secrets
 import sys
@@ -39,6 +40,16 @@ SCHEMA = Path(__file__).with_name("schema.sql")
 OWNER_ENV = Path(".env.neon.owner")
 APP_ENV = Path(".env.neon")
 APP_ROLE = "esp_app"
+
+# The schema this code applies (RC1-640, ADR-0027). Bump SCHEMA_VERSION when
+# schema.sql changes. SCHEMA_COMPATIBLE_WITH is the oldest schema version
+# whose application code still runs against this schema: an additive change
+# keeps it, a breaking one (a dropped or renamed column, a NOT NULL without a
+# default) raises it to the new version. The release manifest publishes both,
+# and installers read them back from review_schema_version before an
+# application rollback.
+SCHEMA_VERSION = 1
+SCHEMA_COMPATIBLE_WITH = 1
 
 
 class SetupError(RuntimeError):
@@ -93,12 +104,40 @@ def with_credentials(url: str, user: str, password: str) -> str:
     return urlunsplit(parts._replace(netloc=netloc))
 
 
+def schema_marker(conn: psycopg.Connection) -> tuple[int, int] | None:
+    """(version, compatible_with) recorded in the database, or None for a
+    database never migrated by a release that writes the marker."""
+    present = conn.execute("SELECT to_regclass('review_schema_version')").fetchone()[0]
+    if present is None:
+        return None
+    row = conn.execute("SELECT version, compatible_with FROM review_schema_version").fetchone()
+    return (row[0], row[1]) if row else None
+
+
 def migrate(url: str, app_role: str = APP_ROLE) -> bool:
     """Apply the schema; if the app role already exists, re-apply its grants
     so a new table is usable without re-passwording the role. Returns
-    whether grants were re-applied."""
+    whether grants were re-applied.
+
+    Refuses a database whose recorded schema is newer than this code's:
+    re-applying an older schema.sql could replace newer functions and
+    triggers, and would rewrite the marker an installer relies on."""
     with psycopg.connect(url, autocommit=True) as conn:
+        marker = schema_marker(conn)
+        if marker and marker[0] > SCHEMA_VERSION:
+            raise SetupError(
+                f"database schema is v{marker[0]}, newer than this release's v{SCHEMA_VERSION};"
+                " migrate with the newer release, never an older one"
+            )
         conn.execute(SCHEMA.read_text())
+        conn.execute(
+            "INSERT INTO review_schema_version (version, compatible_with) VALUES (%s, %s)"
+            " ON CONFLICT (singleton) DO UPDATE SET version = EXCLUDED.version,"
+            " compatible_with = EXCLUDED.compatible_with, applied_at = now()"
+            " WHERE (review_schema_version.version, review_schema_version.compatible_with)"
+            " IS DISTINCT FROM (EXCLUDED.version, EXCLUDED.compatible_with)",
+            (SCHEMA_VERSION, SCHEMA_COMPATIBLE_WITH),
+        )
         exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (app_role,)).fetchone()
         if exists:
             grant_app_role(conn, app_role)
@@ -110,7 +149,10 @@ def grant_app_role(conn: psycopg.Connection, role: str) -> None:
     ident = sql.Identifier(role)
     dbname = sql.Identifier(conn.info.dbname)
     for statement in (
-        sql.SQL("REVOKE ALL ON review_audit, review_sso_sessions, review_scim_users FROM {}"),
+        sql.SQL(
+            "REVOKE ALL ON review_audit, review_sso_sessions, review_scim_users,"
+            " review_schema_version FROM {}"
+        ),
         sql.SQL("GRANT CONNECT ON DATABASE {db} TO {}"),
         sql.SQL("GRANT USAGE ON SCHEMA public TO {}"),
         sql.SQL("GRANT SELECT, INSERT ON review_audit TO {}"),
@@ -179,6 +221,7 @@ def main() -> int:
     sub.add_parser("migrate", help="apply review_ui/schema.sql as the owner (idempotent)")
     sub.add_parser("create-app-role", help=f"(re)create {APP_ROLE}, write {APP_ENV}")
     sub.add_parser("verify", help="as the app role: chain intact, rewrites refused")
+    sub.add_parser("schema-version", help="print the schema marker as JSON (owner URL)")
     scim = sub.add_parser("scim-token", help=f"write ESP_SCIM_TOKEN to {APP_ENV} (RC1-575)")
     scim.add_argument("--rotate", action="store_true", help="replace an existing token")
     args = parser.parse_args()
@@ -200,6 +243,12 @@ def main() -> int:
             write_env_values(APP_ENV, {"ESP_SCIM_TOKEN": secrets.token_urlsafe(32)})
             print(f"wrote ESP_SCIM_TOKEN to {APP_ENV} (mode 600); paste it into the IdP's "
                   "provisioning connector and import it to Fly")
+        elif args.command == "schema-version":
+            with psycopg.connect(owner_url()) as conn:
+                marker = schema_marker(conn)
+            print(json.dumps(
+                {"version": marker[0], "compatible_with": marker[1]} if marker else None
+            ))
         elif args.command == "verify":
             problems = verify(app_url())
             for problem in problems:

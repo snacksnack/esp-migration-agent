@@ -118,7 +118,12 @@ proposes, deterministic Python validates, a human approves.
   in the process env means quiet no-ops; a failed POST is loud on stderr but
   never raises. ml_app `esp-migration-agent`; DD_VERSION defaults to the
   pyproject version so root-span tags index (RC1-407). A pushed v* tag is the
-  release (`release.yml`): gates, then DORA deployment/failure events.
+  release (`release.yml`): gates, then DORA deployment/failure events, then
+  (RC1-640, ADR-0027) the signed GHCR image by digest + SBOM attestation and
+  a GitHub release with `release.json` (`release/manifest.py`) and its
+  Sigstore bundle - what the customer install kit verifies. A schema.sql
+  change must bump `SCHEMA_VERSION` (and `SCHEMA_COMPATIBLE_WITH` if older
+  code breaks) in db_setup.py; `migrate` writes `review_schema_version`.
 - `evals/` - the agent-evals subject `esp-mapping-quality` (RC1-548): frozen
   proposer payloads in `evals/cases/`, ground truth in `expectations.py`
   (must_flag seeded ambiguities / must_propose with target predicates /

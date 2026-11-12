@@ -78,3 +78,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS review_scim_users_user_name
 ALTER TABLE review_sso_sessions ADD COLUMN IF NOT EXISTS revoked_at timestamptz;
 ALTER TABLE review_sso_sessions
     ADD COLUMN IF NOT EXISTS revocation_audited boolean NOT NULL DEFAULT false;
+
+-- RC1-640 (ADR-0027): which release's schema this database holds, so an
+-- installer can decide whether an application rollback is safe without
+-- trusting its own records. One row, written by `db_setup migrate` from
+-- SCHEMA_VERSION / SCHEMA_COMPATIBLE_WITH in db_setup.py. compatible_with is
+-- the oldest schema version whose application code can run against this
+-- schema; a rollback to a release older than that must restore data instead.
+CREATE TABLE IF NOT EXISTS review_schema_version (
+    singleton        boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    version          integer NOT NULL CHECK (version > 0),
+    compatible_with  integer NOT NULL CHECK (compatible_with > 0 AND compatible_with <= version),
+    applied_at       timestamptz NOT NULL DEFAULT now()
+);
